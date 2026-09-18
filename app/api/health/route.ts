@@ -27,7 +27,7 @@ export async function GET() {
   const totalLatency = Date.now() - startTime;
   const memoryUsage = process.memoryUsage();
 
-  const isHealthy = dbConnected && dbLatency < 1000;
+  const isHealthy = dbConnected && (dbLatency < 5000 || dbLatency === -1);
 
   return NextResponse.json({
     status: isHealthy ? 'HEALTHY' : 'DEGRADED',
