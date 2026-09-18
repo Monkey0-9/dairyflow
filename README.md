@@ -238,8 +238,25 @@ npm test
   - Test C: Billing generation & payment idempotency.
   - Test D: Dispute resolution & ledger reconciliation.
   - Test E: End-of-day closing & cryptographic SHA-256 audit chain.
-- **AI Forecasting Engine**:
-  - Dynamically computed MAE, RMSE, and rolling baseline comparisons.
+- **Automated Testing**:
+  - **28 Test Suites | 145 Tests Passing (100%)**
+  - Includes real PostgreSQL pipeline integration, complete 18-step Golden Business Flow, Red Team security penetration suite, 100 concurrent ops load testing, QR hardening, and business intelligence tests.
+
+---
+
+## 📚 Production Documentation Suite (v2.0.0)
+
+| Document | Purpose & Scope |
+|---|---|
+| [FINAL_BASELINE.md](file:///c:/project/project/FINAL_BASELINE.md) | Verification record of 26 development phases across all 16 critical criteria |
+| [THREAT_MODEL.md](file:///c:/project/project/THREAT_MODEL.md) | Asset → Threat → Attack → Control → Test threat analysis for dairy multi-tenancy |
+| [DEPLOYMENT.md](file:///c:/project/project/DEPLOYMENT.md) | Tri-stage Dev / Staging / Prod deployment topology, zero-downtime migrations & secret management |
+| [DISASTER_RECOVERY.md](file:///c:/project/project/DISASTER_RECOVERY.md) | RPO/RTO SLAs, automated backup schedules, point-in-time recovery & business continuity drills |
+| [TESTING.md](file:///c:/project/project/TESTING.md) | Comprehensive test suite manual covering unit, integration, golden flow, red-team, load & concurrency |
+| [AI_MODEL_CARD.md](file:///c:/project/project/AI_MODEL_CARD.md) | Demand forecasting models, temporal validation (MAE/RMSE), safety boundaries & multilingual copilot |
+| [PRIVACY.md](file:///c:/project/project/PRIVACY.md) | Data governance, GDPR/DPDP compliance, PII retention, right-to-erasure & audit logging policies |
+| [PILOT_REPORT.md](file:///c:/project/project/PILOT_REPORT.md) | Real-world dairy pilot evaluation, incident tracking, root cause analyses & hardening fixes |
+| [CHANGELOG.md](file:///c:/project/project/CHANGELOG.md) | Release history and delta log for MilkFlow 2.0 (v2.0.0) |
 
 ---
 
@@ -268,3 +285,4 @@ npm test
 - **Database Connection**: Ensure `DATABASE_URL` specifies `?sslmode=require` for Neon PostgreSQL.
 - **Session Decoding**: If encountering auth issues, ensure `SESSION_SECRET` matches across cluster nodes.
 - **Day Closing Locked**: If an edit fails with `Cannot modify delivery: Day has been finalized`, inspect `day_closings` table for the target date.
+

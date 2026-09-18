@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getStore } from '@/lib/store';
+import { query } from '@/lib/db';
 import { processPayment } from '@/lib/services/payment.service';
 import crypto from 'crypto';
 
@@ -27,7 +28,19 @@ export async function POST(req: NextRequest) {
     }
 
     const payload = JSON.parse(rawBody);
-    const { transactionRef, invoiceId, amount, paymentMethod, note } = payload;
+    let { transactionRef, invoiceId, amount, paymentMethod, note } = payload;
+
+    // Support standard Razorpay webhook event payloads
+    if (!invoiceId && (payload.event === 'payment.captured' || payload.event === 'order.paid')) {
+      const entity = payload.payload?.payment?.entity;
+      if (entity) {
+        transactionRef = entity.id;
+        amount = entity.amount ? entity.amount / 100 : amount;
+        paymentMethod = (entity.method || 'UPI').toUpperCase();
+        invoiceId = entity.notes?.invoiceId;
+        note = entity.description || 'Razorpay webhook confirmation';
+      }
+    }
 
     if (!invoiceId || !amount || !transactionRef) {
       return NextResponse.json(
@@ -48,6 +61,30 @@ export async function POST(req: NextRequest) {
     );
 
     if (!result) {
+      // Direct PostgreSQL fallback for DB-persisted invoices
+      try {
+        const dbInv = await query(`SELECT * FROM invoices WHERE id = $1`, [invoiceId]);
+        if (dbInv.rows.length > 0) {
+          const inv = dbInv.rows[0];
+          await processPayment({
+            invoiceId,
+            customerId: inv.customer_id,
+            farmerId: inv.farmer_id,
+            tenantId: inv.tenant_id,
+            amount: parseFloat(amount),
+            method: paymentMethod || 'UPI',
+            transactionRef,
+          });
+          return NextResponse.json({
+            success: true,
+            status: 'PROCESSED',
+            message: 'Payment recorded in PostgreSQL database',
+            transactionRef,
+          });
+        }
+      } catch (dbErr) {
+        console.warn('[Webhook] DB payment recording error:', dbErr);
+      }
       return NextResponse.json({ success: false, error: 'Invoice not found' }, { status: 404 });
     }
 

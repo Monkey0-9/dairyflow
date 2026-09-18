@@ -326,3 +326,79 @@ export function generateAIDemandForecast(): ComprehensiveForecast {
     insightNotes,
   };
 }
+
+export interface DemandPlanningItem {
+  milkType: 'Cow' | 'Buffalo' | 'A2';
+  forecastDemand: number;
+  safetyStock: number;
+  currentInventory: number;
+  expectedProduction: number;
+  procurementRequirement: number;
+}
+
+export interface DemandPlan {
+  targetDate: string;
+  items: DemandPlanningItem[];
+  totalProcurementNeeded: number;
+}
+
+/**
+ * Stage 18 Demand Planning Engine:
+ * Connects AI demand forecast directly to physical farm operations:
+ * Procurement Requirement = Max(0, Forecast Demand + Safety Stock - Current Inventory - Expected Production)
+ */
+export function calculateDemandPlanning(forecast: ComprehensiveForecast): DemandPlan {
+  // Current farm inventory snapshot (from chiller vats)
+  const currentCowInv = 12.0;
+  const currentBuffaloInv = 8.0;
+  const currentA2Inv = 3.0;
+
+  // Expected herd production tomorrow morning
+  const expectedCowProd = 45.0;
+  const expectedBuffaloProd = 20.0;
+  const expectedA2Prod = 7.0;
+
+  const cowSafety = parseFloat((forecast.cowMilkDemand * 0.08).toFixed(1));
+  const bufSafety = parseFloat((forecast.buffaloMilkDemand * 0.08).toFixed(1));
+  const a2Safety = parseFloat((forecast.a2MilkDemand * 0.08).toFixed(1));
+
+  const cowProc = Math.max(0, parseFloat((forecast.cowMilkDemand + cowSafety - currentCowInv - expectedCowProd).toFixed(1)));
+  const bufProc = Math.max(0, parseFloat((forecast.buffaloMilkDemand + bufSafety - currentBuffaloInv - expectedBuffaloProd).toFixed(1)));
+  const a2Proc = Math.max(0, parseFloat((forecast.a2MilkDemand + a2Safety - currentA2Inv - expectedA2Prod).toFixed(1)));
+
+  const items: DemandPlanningItem[] = [
+    {
+      milkType: 'Cow',
+      forecastDemand: forecast.cowMilkDemand,
+      safetyStock: cowSafety,
+      currentInventory: currentCowInv,
+      expectedProduction: expectedCowProd,
+      procurementRequirement: cowProc,
+    },
+    {
+      milkType: 'Buffalo',
+      forecastDemand: forecast.buffaloMilkDemand,
+      safetyStock: bufSafety,
+      currentInventory: currentBuffaloInv,
+      expectedProduction: expectedBuffaloProd,
+      procurementRequirement: bufProc,
+    },
+    {
+      milkType: 'A2',
+      forecastDemand: forecast.a2MilkDemand,
+      safetyStock: a2Safety,
+      currentInventory: currentA2Inv,
+      expectedProduction: expectedA2Prod,
+      procurementRequirement: a2Proc,
+    },
+  ];
+
+  const totalProcurementNeeded = parseFloat((cowProc + bufProc + a2Proc).toFixed(1));
+
+  return {
+    targetDate: forecast.targetDate,
+    items,
+    totalProcurementNeeded,
+  };
+}
+

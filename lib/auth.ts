@@ -9,6 +9,7 @@ export interface SessionUser {
   customerId?: string;
   farmerId?: string;
   email?: string;
+  exp?: number;
 }
 
 export const SESSION_COOKIE_NAME = 'milkflow_session';
@@ -71,6 +72,9 @@ export function decodeSignedSession(token?: string, secret: string = SESSION_SEC
       const json = Buffer.from(payloadBase64, 'base64url').toString('utf-8');
       const parsed = JSON.parse(json);
       if (parsed && parsed.userId && parsed.role) {
+        if (parsed.exp && Date.now() > parsed.exp) {
+          return null; // Expired session
+        }
         return parsed as SessionUser;
       }
       return null;
@@ -114,6 +118,9 @@ export function decodeSession(token?: string): SessionUser | null {
     }
     const parsed = JSON.parse(json);
     if (parsed && parsed.userId && parsed.role) {
+      if (parsed.exp && Date.now() > parsed.exp) {
+        return null; // Expired session
+      }
       return parsed as SessionUser;
     }
     return null;

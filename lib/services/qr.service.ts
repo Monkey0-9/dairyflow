@@ -278,6 +278,9 @@ export async function revokeQrToken(params: {
   actorRole: string;
 }): Promise<{ success: boolean; error?: string }> {
   if (isUnitTest()) {
+    const store = getStore();
+    const cust = store.customers.find((c) => c.id === params.customerId);
+    if (cust) cust.qrToken = '';
     return { success: true };
   }
 

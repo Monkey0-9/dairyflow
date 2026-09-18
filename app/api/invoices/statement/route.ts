@@ -13,11 +13,28 @@ export const dynamic = 'force-dynamic';
  */
 export async function GET(req: NextRequest) {
   try {
-    const token = req.cookies.get(SESSION_COOKIE_NAME)?.value;
+    const token =
+      req.cookies.get(SESSION_COOKIE_NAME)?.value ||
+      req.headers.get('authorization')?.replace(/^Bearer\s+/i, '');
     const session = decodeSession(token);
     const { searchParams } = new URL(req.url);
 
-    const customerId = searchParams.get('customerId') || session?.customerId;
+    let customerId = searchParams.get('customerId') || session?.customerId;
+    const invoiceId = searchParams.get('invoiceId');
+
+    if (!customerId && invoiceId) {
+      try {
+        const invRes = await query(`SELECT customer_id FROM invoices WHERE id = $1`, [invoiceId]);
+        if (invRes.rows.length > 0) {
+          customerId = invRes.rows[0].customer_id;
+        }
+      } catch {
+        const store = getStore();
+        const stInv = store.invoices.find((i) => i.id === invoiceId);
+        if (stInv) customerId = stInv.customerId;
+      }
+    }
+
     const month = parseInt(searchParams.get('month') || String(new Date().getMonth() + 1), 10);
     const year = parseInt(searchParams.get('year') || String(new Date().getFullYear()), 10);
 
@@ -124,9 +141,13 @@ export async function GET(req: NextRequest) {
       'July', 'August', 'September', 'October', 'November', 'December'
     ];
 
+    const statementStatus = outstandingBalance <= 0 ? 'PAID' : totalPaid > 0 ? 'PARTIALLY_PAID' : 'UNPAID';
+
     return NextResponse.json({
       success: true,
       statement: {
+        invoiceId: invoiceId || undefined,
+        status: statementStatus,
         customerId,
         billingCycle: `${monthNames[month - 1]} ${year}`,
         period: { from: startStr, to: endStr },

@@ -183,3 +183,67 @@ export async function recalculateInvoice(invoiceId: string): Promise<{
     return { totalQuantity, totalAmount, paidAmount, outstandingAmount, status };
   });
 }
+
+export interface CustomerStatementCalculation {
+  customerId: string;
+  period: { from: string; to: string };
+  openingBalance: number;
+  currentCharges: number;
+  adjustments: number; // Credit notes (-) or Debit notes (+)
+  payments: number;
+  closingBalance: number; // Opening Balance + Current Charges + Adjustments - Payments
+  status: 'PAID' | 'PARTIALLY_PAID' | 'OUTSTANDING' | 'OVERPAID';
+}
+
+/**
+ * Authoritative Statement Balance Equation:
+ * Opening Balance + Current Charges + Adjustments - Payments = Closing Balance
+ */
+export function computeStatementBalance(params: {
+  openingBalance: number;
+  currentCharges: number;
+  adjustments: number;
+  payments: number;
+}): { closingBalance: number; status: 'PAID' | 'PARTIALLY_PAID' | 'OUTSTANDING' | 'OVERPAID' } {
+  const closingBalance = parseFloat(
+    (params.openingBalance + params.currentCharges + params.adjustments - params.payments).toFixed(2)
+  );
+
+  let status: 'PAID' | 'PARTIALLY_PAID' | 'OUTSTANDING' | 'OVERPAID' = 'PAID';
+  if (closingBalance > 0) {
+    status = params.payments > 0 ? 'PARTIALLY_PAID' : 'OUTSTANDING';
+  } else if (closingBalance < 0) {
+    status = 'OVERPAID';
+  }
+
+  return { closingBalance, status };
+}
+
+/**
+ * Issue an accounting adjustment item (Credit Note or Debit Note) against an invoice
+ */
+export async function issueAdjustmentNote(params: {
+  invoiceId: string;
+  type: 'CREDIT_NOTE' | 'DEBIT_NOTE';
+  amount: number;
+  description: string;
+}): Promise<{ success: boolean; itemId?: string; error?: string }> {
+  try {
+    const itemId = `adj_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const signedAmount = params.type === 'CREDIT_NOTE' ? -Math.abs(params.amount) : Math.abs(params.amount);
+
+    const todayStr = new Date().toISOString().slice(0, 10);
+    await query(
+      `INSERT INTO invoice_items (id, invoice_id, date, description, quantity, rate, amount)
+       VALUES ($1, $2, $3, $4, 1.0, $5, $6)`,
+      [itemId, params.invoiceId, todayStr, params.description, signedAmount, signedAmount]
+    );
+
+    // Trigger authoritative recalculation
+    await recalculateInvoice(params.invoiceId);
+    return { success: true, itemId };
+  } catch (err: unknown) {
+    return { success: false, error: err instanceof Error ? err.message : 'Adjustment note failed' };
+  }
+}
+

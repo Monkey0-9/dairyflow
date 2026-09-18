@@ -96,7 +96,8 @@ export async function GET(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   try {
     const body = await req.json();
-    const { recordId, deliveredQuantity, status, reason, notes, bottlesReturned, changedBy } = body;
+    const recordId = body.recordId || body.id;
+    const { deliveredQuantity, status, reason, notes, bottlesReturned, changedBy } = body;
 
     if (!recordId) {
       return NextResponse.json({ success: false, error: 'recordId is required' }, { status: 400 });
@@ -125,6 +126,40 @@ export async function PATCH(req: NextRequest) {
     );
 
     if (updated.error || !updated.record) {
+      // Check PostgreSQL directly for database-persisted records
+      try {
+        const dbCheck = await query(`SELECT * FROM delivery_records WHERE id = $1`, [recordId]);
+        if (dbCheck.rows.length > 0) {
+          const row = dbCheck.rows[0];
+          const newDelivered = deliveredQuantity !== undefined ? parseFloat(deliveredQuantity) : Number(row.delivered_quantity);
+          const newStatus = status || row.status;
+          const newNotes = notes !== undefined ? notes : row.notes;
+          const newBottles = bottlesReturned !== undefined ? bottlesReturned : (row.bottles_returned || 0);
+
+          await query(
+            `UPDATE delivery_records
+             SET delivered_quantity = $1, status = $2, notes = $3, bottles_returned = $4, delivered_at = NOW(), updated_at = NOW()
+             WHERE id = $5`,
+            [newDelivered, newStatus, newNotes, newBottles, recordId]
+          );
+
+          return NextResponse.json({
+            success: true,
+            record: {
+              id: recordId,
+              tenantId: row.tenant_id,
+              customerId: row.customer_id,
+              status: newStatus,
+              deliveredQuantity: newDelivered,
+              bottlesReturned: newBottles,
+              notes: newNotes,
+            },
+          });
+        }
+      } catch (dbErr) {
+        console.warn('[Ledger API PATCH] DB fallback failed:', dbErr);
+      }
+
       return NextResponse.json({ success: false, error: updated.error || 'Record not found' }, { status: 404 });
     }
 
