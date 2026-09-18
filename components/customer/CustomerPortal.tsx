@@ -86,6 +86,12 @@ export default function CustomerPortal({
   const [extraReason, setExtraReason] = useState('Guests arriving for festival');
   const [extraSuccess, setExtraSuccess] = useState(false);
 
+  // Permanent Quantity Change Form
+  const [qtyEffective, setQtyEffective] = useState('2026-10-01');
+  const [qtyNew, setQtyNew] = useState('1.5');
+  const [qtyReason, setQtyReason] = useState('');
+  const [qtySuccess, setQtySuccess] = useState(false);
+
   // QR Code Data URL
   const [qrCodeUrl, setQrCodeUrl] = useState('');
 
@@ -306,9 +312,34 @@ export default function CustomerPortal({
     }
   };
 
-  // Handle Online Payment
-  const handleProcessPayment = async (e: React.FormEvent) => {
+  // Submit Permanent Daily Quantity Change (farmer approval required)
+  const handleQuantityChange = async (e: React.FormEvent) => {
     e.preventDefault();
+    try {
+      const res = await fetch('/api/customer/quantity-request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          customerId: currentCustomer.id,
+          effectiveDate: qtyEffective,
+          newQuantity: parseFloat(qtyNew),
+          reason: qtyReason || 'Permanent daily quantity update requested by customer',
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setQtySuccess(true);
+        fetchCustomerDetails();
+        onRefreshAll();
+        setTimeout(() => setQtySuccess(false), 4000);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  // Handle Online Payment
+  const handleProcessPayment = async (e: React.FormEvent) => {    e.preventDefault();
     if (!latestInvoice) return;
     setIsPaying(true);
     try {
@@ -951,6 +982,70 @@ export default function CustomerPortal({
                 className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold shadow-xs transition cursor-pointer"
               >
                 Request Extra Milk
+              </button>
+            </form>
+          </div>
+
+          {/* Permanent Daily Quantity Change */}
+          <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-xs space-y-4">
+            <div className="flex items-center gap-2">
+              <Calendar className="w-5 h-5 text-slate-700" />
+              <h3 className="text-base font-extrabold text-slate-900">Change Daily Quantity (Permanent)</h3>
+            </div>
+            <p className="text-xs text-slate-500">
+              Need more or less milk every day going forward? This permanently updates your
+              subscription once your farmer approves it.
+            </p>
+
+            {qtySuccess && (
+              <div className="p-3 rounded-xl bg-emerald-100 text-emerald-900 text-xs font-bold flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                <span>Quantity change requested! Awaiting farmer approval.</span>
+              </div>
+            )}
+
+            <form onSubmit={handleQuantityChange} className="space-y-3 text-xs">
+              <div>
+                <label className="font-bold text-slate-700 block mb-1">Effective From *</label>
+                <input
+                  type="date"
+                  required
+                  value={qtyEffective}
+                  onChange={(e) => setQtyEffective(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div>
+                <label className="font-bold text-slate-700 block mb-1">New Daily Litres *</label>
+                <input
+                  type="number"
+                  step="0.5"
+                  min="0.5"
+                  max="50"
+                  required
+                  value={qtyNew}
+                  onChange={(e) => setQtyNew(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 font-mono font-bold focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div>
+                <label className="font-bold text-slate-700 block mb-1">Reason</label>
+                <input
+                  type="text"
+                  value={qtyReason}
+                  onChange={(e) => setQtyReason(e.target.value)}
+                  placeholder="e.g. Family size increased"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <button
+                type="submit"
+                className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold shadow-xs transition cursor-pointer"
+              >
+                Request Quantity Change
               </button>
             </form>
           </div>

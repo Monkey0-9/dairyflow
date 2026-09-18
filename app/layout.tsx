@@ -17,6 +17,10 @@ export const metadata: Metadata = {
   description:
     "Automated subscription-based digital milk ledger, real-time delivery tracking, exception handling, automated monthly billing, and integrated payments for dairy farmers.",
   manifest: "/manifest.json",
+  icons: {
+    icon: "/icons/icon-192.png",
+    apple: "/icons/apple-touch-icon.png",
+  },
   appleWebApp: { capable: true, title: "MilkFlow", statusBarStyle: "default" },
 };
 

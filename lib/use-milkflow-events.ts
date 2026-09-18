@@ -14,26 +14,64 @@ export function useMilkFlowEvents(onEvent: (event: MilkFlowEvent) => void) {
   }, [onEvent]);
 
   useEffect(() => {
-    if (typeof window === 'undefined' || typeof EventSource === 'undefined') return;
+    if (typeof window === 'undefined') return;
     let source: EventSource | null = null;
-    try {
-      source = new EventSource('/api/events');
-      source.onmessage = (msg) => {
-        try {
-          const raw = JSON.parse(msg.data) as { type?: string };
-          if (!raw.type || raw.type === 'connected') return;
-          handlerRef.current(raw as MilkFlowEvent);
-        } catch {
-          // ignore malformed frames / heartbeats
+    let lastSeenTimestamp = new Date().toISOString();
+    let pollTimer: NodeJS.Timeout | null = null;
+
+    const pollRecent = async () => {
+      try {
+        const res = await fetch(`/api/events?poll=true&since=${encodeURIComponent(lastSeenTimestamp)}`, {
+          headers: { Accept: 'application/json' },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data.events)) {
+            for (const evt of data.events) {
+              if (evt.timestamp > lastSeenTimestamp) {
+                lastSeenTimestamp = evt.timestamp;
+              }
+              handlerRef.current(evt);
+            }
+          }
+          if (data.timestamp) {
+            lastSeenTimestamp = data.timestamp;
+          }
         }
-      };
-      source.onerror = () => {
-        // EventSource auto-retries; close only when page unloads (cleanup below)
-      };
-    } catch {
-      // SSE unavailable (offline) — silent
+      } catch {
+        // network offline / transient
+      }
+    };
+
+    if (typeof EventSource !== 'undefined') {
+      try {
+        source = new EventSource('/api/events');
+        source.onmessage = (msg) => {
+          try {
+            const raw = JSON.parse(msg.data) as { type?: string; timestamp?: string };
+            if (!raw.type || raw.type === 'connected') return;
+            if (raw.timestamp && raw.timestamp > lastSeenTimestamp) {
+              lastSeenTimestamp = raw.timestamp;
+            }
+            handlerRef.current(raw as MilkFlowEvent);
+          } catch {
+            // ignore malformed frames / heartbeats
+          }
+        };
+        source.onerror = () => {
+          // Fallback poll on SSE error
+          pollRecent();
+        };
+      } catch {
+        // SSE unavailable, rely on interval
+      }
     }
+
+    // Periodic safety poll every 20 seconds (ensures reliability across serverless instance reboots)
+    pollTimer = setInterval(pollRecent, 20000);
+
     return () => {
+      if (pollTimer) clearInterval(pollTimer);
       try {
         source?.close();
       } catch { /* ignore */ }

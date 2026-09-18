@@ -1,71 +1,99 @@
-# MilkFlow 2.0 — Production Deployment Guide
+# MilkFlow 2.0 — Production Deployment Guide (Vercel + Neon)
 
-## 1. Production Architecture Overview
-MilkFlow 2.0 is built on **Next.js 16 (Turbopack, App Router, React 19)**, deployed as a stateless containerized runtime connected to **Neon Serverless PostgreSQL** via pooled TCP connections with SSL verification.
+## 1. Production Architecture
+
+Next.js 16 (Turbopack, App Router, React 19) on **Vercel Serverless Functions**,
+**Neon Serverless PostgreSQL** via the pooled connection string, **Upstash Redis**
+for cross-instance real-time fan-out, **Razorpay** for payments, **Meta WhatsApp
+Cloud API** (+ SMS fallback) for reminders, and **Vercel Cron** for scheduled jobs.
 
 ```
-                  [ Vercel Edge / Cloudflare CDN ]
-                                 │
-                                 ▼
-                  [ Next.js 16 Production Pods ]
-                   ├── HTTP Handlers
-                   ├── Server-Sent Events (SSE) Bus
-                   └── sliding-window rate limiters
-                                 │
-                                 ▼
-                 [ Neon Serverless PostgreSQL Pool ]
-                  (PgBouncer Connection Pooler)
+[ Farmers / Customers (PWA) ]
+              │
+              ▼
+[ Vercel: Next.js 16 + proxy.ts gates + security headers + rate limits ]
+   ├── Route handlers (DB-first, store fallback in tests)
+   ├── SSE + 20s cross-instance poll (Upstash outbox)
+   └── Vercel Cron: monthly-billing / daily-check / notifications:remind
+              │
+              ▼
+[ Neon PostgreSQL (POOLER url) ]   [ Upstash Redis ]   [ Razorpay / Meta / SMS ]
 ```
 
----
+Serverless constraints applied in code: `pg` pool `PG_POOL_MAX=3` with fast
+recycle + statement timeout (`lib/db.ts`), in-process event bus backed by the
+Redis outbox (`lib/events.ts`), per-IP sliding-window rate limits on
+auth/payment/webhook/order routes.
 
-## 2. Pre-Deployment Configuration
-Ensure the following production environment variables are configured in your hosting platform (Vercel, AWS ECS, GCP Cloud Run, or Docker Compose):
+## 2. Environment Variables (Vercel → Project → Settings → Environment)
 
 ```bash
+# Database (Neon POOLER host for DATABASE_URL; direct host for DIRECT_URL)
 DATABASE_URL="postgresql://<user>:<password>@<pooler-host>/milkflow_prod?sslmode=require"
 DIRECT_URL="postgresql://<user>:<password>@<direct-host>/milkflow_prod?sslmode=require"
-SESSION_SECRET="<openssl rand -hex 64>"
+PG_POOL_MAX="3"
+
+# Auth
+SESSION_SECRET="<openssl rand -hex 64>"   # required in production, boot fails without it
+DEMO_LOGIN_ENABLED="false"                # disable 1-tap demo logins after seeding a real admin
+
+# Payments (live)
 RAZORPAY_KEY_ID="rzp_live_..."
 RAZORPAY_KEY_SECRET="..."
 RAZORPAY_WEBHOOK_SECRET="whsec_..."
+
+# Real-time fan-out (both required for multi-instance SSE catch-up)
+UPSTASH_REDIS_REST_URL="https://...upstash.io"
+UPSTASH_REDIS_REST_TOKEN="..."
+
+# Notifications
+NOTIFY_PROVIDER="auto"                    # auto | whatsapp | sms | off
+WHATSAPP_PROVIDER_KEY="<meta-cloud-api-token>"
+WA_PHONE_NUMBER_ID="<meta-phone-number-id>"
+WA_TEMPLATE_NAME="<approved-utility-template>"  # optional; text mode inside 24h window
+WA_TEMPLATE_LANG="en"
+SMS_API_URL=""                            # generic JSON POST { to, message }
+SMS_PROVIDER_KEY="..."
+SMS_API_KEY_HEADER="Authorization"
+
+# Crons (Vercel sends this as Authorization: Bearer automatically)
+CRON_SECRET="<openssl rand -hex 32>"
+
 NODE_ENV="production"
-PORT=3000
 ```
 
----
+See `.env.example` for the full template.
 
-## 3. Deployment Steps
+## 3. Deploy Steps
 
-### Step 1: Database Migration
-Run database migrations before rolling out new container images:
+### Step 1: Database
 ```bash
-npm run prisma:migrate:deploy
-# or
-npx tsx scripts/migrate.ts
+npx tsx scripts/migrate.ts     # raw-SQL schema (20 tables)
+npx tsx scripts/seed.ts        # seed demo tenant (staging only — never production customer data)
 ```
 
-### Step 2: Build Production Bundle
+### Step 2: Vercel project
 ```bash
-npm run build
+vercel link
+vercel env pull .env.local   # sanity-check parity, never commit
+git push origin main         # CI: lint → test (204) → build → preview/production deploy
 ```
-Verify that all 37+ routes compile cleanly without type or lint errors.
+`vercel.json` registers three crons (all UTC): `monthly-billing` (1st, 02:30),
+`daily-check` (22:00), `notifications/remind` sender (22:15).
 
-### Step 3: Launch Service & Readiness Verification
+### Step 3: Verify
 ```bash
-npm run start
+curl -f https://<app>.vercel.app/api/health
 ```
-Verify health endpoints:
-```bash
-curl -f http://localhost:3000/health
-curl -f http://localhost:3000/ready
-curl -f http://localhost:3000/live
-curl -f http://localhost:3000/metrics
-```
+Expect `HEALTHY`, `database.UP`, `realtimeOutbox.UP`. Then run
+`PILOT_CHECKLIST.md` end-to-end (₹1 live payment, pause→approve SSE,
+offline queue drain, cron dry-runs).
 
----
-
-## 4. Rollback Plan
-1. Revert container image tag to previous release (`v1.9.9` or previous git SHA).
-2. Database schema changes are strictly backward-compatible (additive only; columns have defaults or are nullable).
-3. Verify `/health` and `/ready` probes return HTTP 200 within 15 seconds of rollback.
+## 4. Rollback
+1. Vercel → Deployments → Promote previous production deployment (instant).
+2. Schema changes are additive-only (nullable columns/defaults); no down-migration needed.
+3. If a bad cron run double-bills: invoices are `UNIQUE(customer,month,year)` and
+   payments idempotent on `transaction_ref` — reruns are safe; void via SuperAdmin
+   dispute flow, never raw SQL deletes.
+4. Rotate `CRON_SECRET`/provider keys if a runaway sender is suspected, then
+   `NOTIFY_PROVIDER=off` as a kill-switch (redeploy, no code change).

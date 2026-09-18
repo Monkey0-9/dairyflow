@@ -97,6 +97,7 @@ export async function flushOfflineQueue(): Promise<{ flushed: number; remaining:
           reason: m.reason,
           notes: m.notes,
           bottlesReturned: m.bottlesReturned,
+          clientUpdatedAt: m.queuedAt,
         }),
       });
       if (res.ok && m.queueId !== undefined) {

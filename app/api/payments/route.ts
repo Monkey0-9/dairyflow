@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getStore } from '@/lib/store';
 import { decodeSession, SESSION_COOKIE_NAME } from '@/lib/auth';
-import { processPayment } from '@/lib/services/payment.service';
+import { enforceActiveAccount } from '@/lib/api-auth';
+import { checkRateLimit } from '@/lib/security/rate-limiter';
+import { processPayment, verifyRazorpayPaymentSignature } from '@/lib/services/payment.service';
 import { publishEvent } from '@/lib/events';
 
 const isUnitTest = () => process.env.TEST_ENV === 'unit' || process.env.VITEST === 'true';
@@ -26,9 +28,21 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    const ip = req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || 'anonymous_ip';
+    const limitCheck = checkRateLimit(`payments_${ip}`, 30, 60);
+    if (!limitCheck.allowed) {
+      return NextResponse.json(
+        { success: false, error: 'Too many payment attempts. Please try again later.' },
+        { status: 429, headers: { 'Retry-After': String(limitCheck.resetTimeSeconds) } }
+      );
+    }
     const body = await req.json();
     const token = req.cookies.get(SESSION_COOKIE_NAME)?.value;
     const session = decodeSession(token);
+    if (session) {
+      const suspended = await enforceActiveAccount(session);
+      if (suspended) return suspended;
+    }
     const { invoiceId, amount, paymentMethod, method, transactionRef, note } = body;
     const payMethod = paymentMethod || method;
 
@@ -39,7 +53,34 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const txRef = transactionRef || `TXN_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    // Razorpay checkout callback: verify signature BEFORE crediting.
+    // transactionRef carries the razorpay_payment_id for natural idempotency.
+    const { razorpayOrderId, razorpayPaymentId, razorpaySignature } = body as {
+      razorpayOrderId?: string;
+      razorpayPaymentId?: string;
+      razorpaySignature?: string;
+    };
+    let txRef = transactionRef || `TXN_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    if (razorpayOrderId || razorpayPaymentId || razorpaySignature) {
+      if (!razorpayOrderId || !razorpayPaymentId || !razorpaySignature) {
+        return NextResponse.json(
+          { success: false, error: 'Incomplete Razorpay callback: order, payment and signature are required' },
+          { status: 400 }
+        );
+      }
+      const valid = verifyRazorpayPaymentSignature({
+        orderId: razorpayOrderId,
+        paymentId: razorpayPaymentId,
+        signature: razorpaySignature,
+      });
+      if (!valid) {
+        return NextResponse.json(
+          { success: false, error: 'Payment verification failed. Signature mismatch.' },
+          { status: 402 }
+        );
+      }
+      txRef = razorpayPaymentId;
+    }
 
     // DB-first idempotent payment via processPayment (UNIQUE(transaction_ref))
     if (!isUnitTest()) {

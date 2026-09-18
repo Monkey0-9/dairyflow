@@ -1,9 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getStore } from '@/lib/store';
-import { encodeSession, SESSION_COOKIE_NAME, SessionUser } from '@/lib/auth';
+import { encodeSignedSession, CLIENT_HINT_COOKIE_NAME, formatClientHint, SESSION_COOKIE_NAME, SessionUser } from '@/lib/auth';
+import { checkRateLimit } from '@/lib/security/rate-limiter';
 import { DeliveryShift } from '@/lib/types';
 
 export async function POST(req: NextRequest) {
+  // Rate limiting: 20 registration attempts per IP per minute
+  const ip = req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || 'anonymous_ip';
+  const limitCheck = checkRateLimit(`register_${ip}`, 20, 60);
+  if (!limitCheck.allowed) {
+    return NextResponse.json(
+      { success: false, error: 'Too many registration attempts. Please try again later.' },
+      { status: 429, headers: { 'Retry-After': String(limitCheck.resetTimeSeconds) } }
+    );
+  }
+
   try {
     const body = await req.json();
     const { name, phone, address, productId, quantity, deliveryShift } = body;
@@ -47,7 +58,7 @@ export async function POST(req: NextRequest) {
       email: result.user.email,
     };
 
-    const token = encodeSession(sessionUser);
+    const token = encodeSignedSession(sessionUser);
 
     const response = NextResponse.json({
       success: true,
@@ -57,11 +68,26 @@ export async function POST(req: NextRequest) {
       redirectUrl: '/customer',
     });
 
+    const isProd = process.env.NODE_ENV === 'production';
+
+    // 1. Primary authenticated session cookie (strictly HttpOnly, protected from XSS)
     response.cookies.set({
       name: SESSION_COOKIE_NAME,
       value: token,
       path: '/',
+      httpOnly: true,
+      secure: isProd,
+      maxAge: 60 * 60 * 24 * 7,
+      sameSite: 'lax',
+    });
+
+    // 2. Client-readable hint cookie (non-sensitive: name, role, tenantId only)
+    response.cookies.set({
+      name: CLIENT_HINT_COOKIE_NAME,
+      value: formatClientHint(sessionUser),
+      path: '/',
       httpOnly: false,
+      secure: isProd,
       maxAge: 60 * 60 * 24 * 7,
       sameSite: 'lax',
     });

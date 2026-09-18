@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { decodeSession, SESSION_COOKIE_NAME } from './lib/session';
+// Verified HMAC-SHA256 session decoder (Node.js runtime). Unsigned or
+// expired tokens are rejected here; login issues signed expiring tokens.
+import { decodeSession, SESSION_COOKIE_NAME } from './lib/auth';
 
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;

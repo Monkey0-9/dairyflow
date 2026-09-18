@@ -1,4 +1,5 @@
 import { transaction } from '../db';
+import crypto from 'crypto';
 
 export interface ProcessPaymentParams {
   invoiceId: string;
@@ -17,6 +18,33 @@ export interface PaymentResult {
   newOutstandingAmount?: number;
   newStatus?: string;
   error?: string;
+}
+
+/**
+ * Verify a Razorpay checkout callback signature:
+ *   HMAC_SHA256(order_id + '|' + payment_id, key_secret) == razorpay_signature
+ * Uses timing-safe comparison. Returns false when the key secret is absent
+ * (live verification impossible) so callers can fail closed.
+ */
+export function verifyRazorpayPaymentSignature(params: {
+  orderId: string;
+  paymentId: string;
+  signature: string;
+  keySecret?: string;
+}): boolean {
+  const secret = params.keySecret ?? process.env.RAZORPAY_KEY_SECRET;
+  if (!secret || !params.orderId || !params.paymentId || !params.signature) return false;
+  try {
+    const expected = crypto
+      .createHmac('sha256', secret)
+      .update(`${params.orderId}|${params.paymentId}`)
+      .digest('hex');
+    const a = Buffer.from(expected, 'hex');
+    const b = Buffer.from(params.signature, 'hex');
+    return a.length === b.length && crypto.timingSafeEqual(a, b);
+  } catch {
+    return false;
+  }
 }
 
 /**

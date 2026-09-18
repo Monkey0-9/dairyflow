@@ -1,22 +1,71 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getStore } from '@/lib/store';
 import { decodeSession, SESSION_COOKIE_NAME } from '@/lib/auth';
-import crypto from 'crypto';
+import { enforceActiveAccount } from '@/lib/api-auth';
+import { checkRateLimit } from '@/lib/security/rate-limiter';
 
-const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID;
 const FARMER_UPI = process.env.FARMER_UPI_ID || 'greenvalley@okaxis';
 const FARMER_NAME = process.env.FARMER_BUSINESS_NAME || 'GreenValley Dairy Farm';
 
 /**
+ * Create a live Razorpay order via REST (no SDK dependency).
+ * Returns null when live keys are absent so callers use sandbox mode.
+ */
+async function createLiveOrder(params: {
+  amountPaise: number;
+  receipt: string;
+  notes?: Record<string, string>;
+}): Promise<{ id: string; status: string } | null> {
+  const keyId = process.env.RAZORPAY_KEY_ID;
+  const keySecret = process.env.RAZORPAY_KEY_SECRET;
+  if (!keyId || !keySecret) return null;
+  const res = await fetch('https://api.razorpay.com/v1/orders', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Basic ${Buffer.from(`${keyId}:${keySecret}`).toString('base64')}`,
+    },
+    body: JSON.stringify({
+      amount: params.amountPaise,
+      currency: 'INR',
+      receipt: params.receipt.slice(0, 40),
+      notes: params.notes,
+    }),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`Razorpay order creation failed (${res.status}): ${text.slice(0, 200)}`);
+  }
+  const order = (await res.json()) as { id: string; status: string };
+  if (!order?.id) throw new Error('Razorpay returned an order without an id');
+  return order;
+}
+
+/**
  * POST /api/payments/create-order
- * Creates a Razorpay Order (live when keys present, sandbox-simulated otherwise)
- * and returns a dynamic UPI deep-link for one-tap mobile payment.
+ * Live Razorpay order when RAZORPAY_KEY_ID + RAZORPAY_KEY_SECRET are set,
+ * otherwise an explicit sandbox order (tests stay hermetic). Always returns
+ * a dynamic UPI deep-link for one-tap mobile payment.
  */
 export async function POST(req: NextRequest) {
+  const ip = req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || 'anonymous_ip';
+  const limitCheck = checkRateLimit(`create_order_${ip}`, 30, 60);
+  if (!limitCheck.allowed) {
+    return NextResponse.json(
+      { success: false, error: 'Too many order creation requests. Please try again later.' },
+      { status: 429, headers: { 'Retry-After': String(limitCheck.resetTimeSeconds) } }
+    );
+  }
+
   try {
     const body = await req.json();
     const token = req.cookies.get(SESSION_COOKIE_NAME)?.value;
     const session = decodeSession(token);
+    if (session) {
+      const suspended = await enforceActiveAccount(session);
+      if (suspended) return suspended;
+    }
+
     const { invoiceId, amount } = body;
 
     if (!invoiceId || amount === undefined) {
@@ -47,25 +96,45 @@ export async function POST(req: NextRequest) {
       `&am=${amt.toFixed(2)}&cu=INR` +
       `&tn=${encodeURIComponent(txnNote)}`;
 
-    const sandbox = !RAZORPAY_KEY_ID;
-    const orderId = sandbox
-      ? `order_sandbox_${Date.now()}`
-      : `order_${crypto.randomBytes(8).toString('hex')}`;
+    const amountPaise = Math.round(amt * 100);
+    const isTest = process.env.TEST_ENV === 'unit' || process.env.VITEST === 'true';
+    let mode: 'live' | 'sandbox' = 'sandbox';
+    let orderId = `order_sandbox_${Date.now()}`;
+    let orderStatus = 'created';
 
-    // When live keys exist, a real implementation would call:
-    //   Razorpay.orders.create({ amount: amt*100, currency: 'INR', receipt: invoiceId })
-    // Here we return the order shape without network I/O so tests stay hermetic.
+    if (!isTest && process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) {
+      try {
+        const live = await createLiveOrder({
+          amountPaise,
+          receipt: invoiceId,
+          notes: {
+            invoiceId,
+            customerId: invoice?.customerId || session?.customerId || '',
+            tenantId: session?.tenantId || '',
+          },
+        });
+        if (live) {
+          mode = 'live';
+          orderId = live.id;
+          orderStatus = live.status;
+        }
+      } catch (err) {
+        console.warn('[create-order] Live Razorpay order failed, falling back to simulated order:', err);
+      }
+    }
+
     return NextResponse.json({
       success: true,
-      sandbox,
+      sandbox: mode === 'sandbox',
+      mode,
       order: {
         id: orderId,
-        amount: Math.round(amt * 100),
+        amount: amountPaise,
         amountDisplay: amt,
         currency: 'INR',
         receipt: invoiceId,
-        status: 'created',
-        keyId: RAZORPAY_KEY_ID || 'rzp_test_sandbox',
+        status: orderStatus,
+        keyId: mode === 'live' ? process.env.RAZORPAY_KEY_ID : 'rzp_test_sandbox',
       },
       upi: {
         vpa: upiId,

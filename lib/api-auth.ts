@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { decodeSession, SESSION_COOKIE_NAME, SessionUser } from './auth';
+import { query } from './db';
 import { UserRole } from './types';
 
 export interface AuthResult {
@@ -102,4 +103,49 @@ export function enforceTenantAccess(
     );
   }
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// Suspended-account enforcement (per-request, best-effort).
+// Demo/seed session ids (user_*, cust_*, non-UUID) predate the database and
+// are skipped. Results are cached 60s to bound Neon query cost on hot paths.
+// Fail-open when the database is unreachable (login enforces strictly).
+// ---------------------------------------------------------------------------
+
+const suspendCache = new Map<string, { suspended: boolean; checkedAt: number }>();
+const SUSPEND_CACHE_MS = 60000;
+const isSeedId = (id?: string): boolean =>
+  !id || id.startsWith('user_') || id.startsWith('cust_') || id.startsWith('F') || id.length < 30;
+
+/** Bust the suspend cache (call after tenant/user status mutations). */
+export function clearSuspendCache(userId?: string): void {
+  if (userId) suspendCache.delete(userId);
+  else suspendCache.clear();
+}
+
+export async function enforceActiveAccount(user: SessionUser): Promise<NextResponse | null> {
+  try {
+    if (isSeedId(user.userId)) return null;
+    const cached = suspendCache.get(user.userId);
+    if (cached && Date.now() - cached.checkedAt < SUSPEND_CACHE_MS) {
+      if (!cached.suspended) return null;
+    } else {
+      const res = await query(
+        `SELECT u.is_active as "userActive", t.is_active as "tenantActive"
+         FROM users u JOIN tenants t ON u.tenant_id = t.id
+         WHERE u.id = $1`,
+        [user.userId]
+      );
+      const row = res.rows[0];
+      const suspended = !row || !row.userActive || !row.tenantActive;
+      suspendCache.set(user.userId, { suspended, checkedAt: Date.now() });
+      if (!suspended) return null;
+    }
+    return NextResponse.json(
+      { success: false, error: 'Forbidden: Account or dairy is suspended.' },
+      { status: 403 }
+    );
+  } catch {
+    return null; // fail-open when DB unreachable
+  }
 }

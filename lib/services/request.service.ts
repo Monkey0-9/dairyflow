@@ -255,6 +255,37 @@ export async function createExtraMilkRequest(params: {
 }
 
 /**
+ * Create a permanent daily-quantity change request directly in PostgreSQL.
+ * Used by POST /api/customer/quantity-request (DB-first).
+ * Takes effect only after farmer approval (handleRequestAction).
+ */
+export async function createQuantityChangeRequest(params: {
+  customerId: string;
+  farmerId?: string;
+  tenantId?: string;
+  effectiveDate: string;
+  newQuantity: number;
+  reason?: string;
+}): Promise<{ success: boolean; id?: string; error?: string }> {
+  const scope = params.tenantId && params.farmerId
+    ? { tenantId: params.tenantId, farmerId: params.farmerId }
+    : await resolveCustomerScope(params.customerId);
+  if (!scope) return { success: false, error: 'Customer not found' };
+  try {
+    const id = `QCR_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    await query(
+      `INSERT INTO quantity_change_requests (id, tenant_id, customer_id, farmer_id, effective_date, new_quantity, reason, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING')`,
+      [id, scope.tenantId, params.customerId, params.farmerId || scope.farmerId, params.effectiveDate, params.newQuantity, params.reason || null]
+    );
+    return { success: true, id };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Failed to create quantity change request';
+    return { success: false, error: message };
+  }
+}
+
+/**
  * Approve or reject a request by ID.
  * When approved, applies changes to delivery ledger or subscriptions inside a transaction.
  */

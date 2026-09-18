@@ -13,7 +13,31 @@ export interface SessionUser {
 }
 
 export const SESSION_COOKIE_NAME = 'milkflow_session';
-const SESSION_SECRET = process.env.SESSION_SECRET || 'milkflow-enterprise-secure-session-key-2026';
+export const CLIENT_HINT_COOKIE_NAME = 'milkflow_client_hint';
+
+export function getSessionSecret(): string {
+  const secret = process.env.SESSION_SECRET;
+  if (!secret) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('[FATAL SECURITY CONFIGURATION ERROR] SESSION_SECRET must be set in production environment.');
+    }
+    return 'milkflow-enterprise-secure-session-key-2026';
+  }
+  if (process.env.NODE_ENV === 'production' && secret === 'milkflow-enterprise-secure-session-key-2026') {
+    throw new Error('[FATAL SECURITY CONFIGURATION ERROR] Insecure default placeholder SESSION_SECRET cannot be used in production.');
+  }
+  return secret;
+}
+
+export function formatClientHint(user: SessionUser): string {
+  return JSON.stringify({
+    userId: user.userId,
+    name: user.name,
+    role: user.role,
+    tenantId: user.tenantId,
+    customerId: user.customerId,
+  });
+}
 
 // ---------------------------------------------------------
 // Password Hashing & Verification (scrypt with unique salt)
@@ -41,7 +65,7 @@ export function verifyPassword(password: string, storedHash: string, salt: strin
 // Cryptographic HMAC-SHA256 Signed Session Management
 // ---------------------------------------------------------
 
-function generateHmac(payload: string, secret: string = SESSION_SECRET): string {
+function generateHmac(payload: string, secret: string = getSessionSecret()): string {
   return crypto.createHmac('sha256', secret).update(payload).digest('base64url');
 }
 
@@ -49,8 +73,10 @@ function generateHmac(payload: string, secret: string = SESSION_SECRET): string 
  * Encode session with HMAC-SHA256 signature attached.
  * Format: base64(json) . hmac
  */
-export function encodeSignedSession(user: SessionUser, secret: string = SESSION_SECRET): string {
-  const json = JSON.stringify(user);
+export function encodeSignedSession(user: SessionUser, secret: string = getSessionSecret()): string {
+  const exp = user.exp || Date.now() + 7 * 24 * 60 * 60 * 1000; // 7 days lifetime
+  const payloadWithExp: SessionUser = { ...user, exp };
+  const json = JSON.stringify(payloadWithExp);
   const payloadBase64 = Buffer.from(json).toString('base64url');
   const signature = generateHmac(payloadBase64, secret);
   return `${payloadBase64}.${signature}`;
@@ -59,7 +85,7 @@ export function encodeSignedSession(user: SessionUser, secret: string = SESSION_
 /**
  * Decode and verify HMAC signature.
  */
-export function decodeSignedSession(token?: string, secret: string = SESSION_SECRET): SessionUser | null {
+export function decodeSignedSession(token?: string, secret: string = getSessionSecret()): SessionUser | null {
   if (!token) return null;
   try {
     const parts = token.split('.');
@@ -97,7 +123,9 @@ export function encodeSession(user: SessionUser): string {
 }
 
 /**
- * Backward-compatible session decoder (accepts signed tokens, base64 tokens, or raw JSON)
+ * Session decoder. Signed HMAC tokens are verified (signature + expiry).
+ * Unsigned legacy base64 tokens are accepted ONLY outside production, so
+ * existing unit tests keep passing while production rejects forged sessions.
  */
 export function decodeSession(token?: string): SessionUser | null {
   if (!token) return null;
@@ -106,9 +134,13 @@ export function decodeSession(token?: string): SessionUser | null {
   if (token.includes('.')) {
     const signed = decodeSignedSession(token);
     if (signed) return signed;
+    // A dotted token that fails verification is forged/tampered: hard reject.
+    return null;
   }
 
-  // 2. Try standard base64 decoding (for backward compatibility with existing tests)
+  // 2. Unsigned legacy tokens: dev/test compatibility only.
+  if (process.env.NODE_ENV === 'production') return null;
+
   try {
     let json = '';
     if (typeof Buffer !== 'undefined') {

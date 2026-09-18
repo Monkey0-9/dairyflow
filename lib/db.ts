@@ -11,16 +11,23 @@ if (!connectionString) {
 // Global pool instance with connection pooling optimized for Neon / Serverless
 let pool: Pool | null = null;
 
+const isServerless = !!process.env.VERCEL || process.env.NODE_ENV === 'production';
+
 export function getPool(): Pool {
   if (!pool) {
+    // Serverless-safe defaults: small pool, fast recycle. Use the Neon
+    // pooled (pooler) connection string in production (see .env.example).
+    // Override with PG_POOL_MAX when a dedicated larger pool is provisioned.
+    const max = Number(process.env.PG_POOL_MAX || (isServerless ? 3 : 10));
     pool = new Pool({
       connectionString: process.env.DATABASE_URL,
       ssl: {
         rejectUnauthorized: false, // Required for Neon SSL connection
       },
-      max: 20, // maximum connection pool size
-      idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 10000,
+      max: Number.isFinite(max) && max > 0 ? max : 3,
+      idleTimeoutMillis: 10000,
+      connectionTimeoutMillis: 8000,
+      statement_timeout: 15000,
     });
 
     pool.on('error', (err) => {
@@ -30,46 +37,102 @@ export function getPool(): Pool {
   return pool;
 }
 
+const RETRYABLE_ERROR_CODES = new Set([
+  'ECONNRESET',
+  'ETIMEDOUT',
+  'ECONNREFUSED',
+  '57P01', // admin shutdown / terminating connection
+  '08006', // connection failure
+  '08001', // unable to establish sqlconnection
+]);
+
+function isRetryable(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const errorObj = err as { code?: string; message?: string };
+  if (errorObj.code && RETRYABLE_ERROR_CODES.has(errorObj.code)) return true;
+  if (errorObj.message && (
+    errorObj.message.includes('Connection terminated unexpectedly') ||
+    errorObj.message.includes('timeout') ||
+    errorObj.message.includes('closed the connection')
+  )) {
+    return true;
+  }
+  return false;
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 /**
- * Execute a parameterized query against PostgreSQL.
+ * Execute a parameterized query against PostgreSQL with automatic exponential backoff retry for transient connection drops.
  */
 export async function query<T extends QueryResultRow = QueryResultRow>(
   text: string,
-  params?: unknown[]
+  params?: unknown[],
+  maxRetries = 3
 ): Promise<QueryResult<T>> {
-  const start = Date.now();
-  const pool = getPool();
-  try {
-    const res = await pool.query<T>(text, params);
-    const duration = Date.now() - start;
-    if (process.env.DEBUG_SQL === 'true') {
-      console.log('[SQL]', { text, duration, rows: res.rowCount });
+  let attempt = 0;
+  while (true) {
+    const start = Date.now();
+    const currentPool = getPool();
+    try {
+      const res = await currentPool.query<T>(text, params);
+      const duration = Date.now() - start;
+      if (process.env.DEBUG_SQL === 'true') {
+        console.log('[SQL]', { text, duration, rows: res.rowCount });
+      }
+      return res;
+    } catch (error) {
+      attempt++;
+      if (attempt <= maxRetries && isRetryable(error)) {
+        const backoff = Math.min(200 * Math.pow(2, attempt), 1500) + Math.floor(Math.random() * 50);
+        console.warn(`[DB Retry] Query failed with transient error. Retrying attempt ${attempt}/${maxRetries} after ${backoff}ms...`);
+        await sleep(backoff);
+        continue;
+      }
+      console.error('[SQL Error]', { text, error });
+      throw error;
     }
-    return res;
-  } catch (error) {
-    console.error('[SQL Error]', { text, error });
-    throw error;
   }
 }
 
 /**
- * Run operations within a single database transaction.
+ * Run operations within a single database transaction with automatic retry on transient connect failure.
  */
 export async function transaction<T>(
-  callback: (client: PoolClient) => Promise<T>
+  callback: (client: PoolClient) => Promise<T>,
+  maxRetries = 3
 ): Promise<T> {
-  const pool = getPool();
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    const result = await callback(client);
-    await client.query('COMMIT');
-    return result;
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
+  let attempt = 0;
+  while (true) {
+    const currentPool = getPool();
+    let client: PoolClient | null = null;
+    try {
+      client = await currentPool.connect();
+      await client.query('BEGIN');
+      const result = await callback(client);
+      await client.query('COMMIT');
+      return result;
+    } catch (error) {
+      if (client) {
+        try {
+          await client.query('ROLLBACK');
+        } catch {
+          // ignore rollback error if client is dead
+        }
+      }
+      attempt++;
+      if (attempt <= maxRetries && isRetryable(error)) {
+        const backoff = Math.min(200 * Math.pow(2, attempt), 1500) + Math.floor(Math.random() * 50);
+        console.warn(`[DB Retry] Transaction failed with transient error. Retrying attempt ${attempt}/${maxRetries} after ${backoff}ms...`);
+        await sleep(backoff);
+        continue;
+      }
+      throw error;
+    } finally {
+      if (client) {
+        client.release();
+      }
+    }
   }
 }
 

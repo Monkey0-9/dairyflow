@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { query, getPool } from '@/lib/db';
+import { pingOutbox } from '@/lib/events';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,6 +18,8 @@ export async function GET() {
     console.error('[Health Check] DB query failed:', err);
   }
 
+  const redis = await pingOutbox().catch(() => ({ configured: false, reachable: false, latencyMs: -1 }));
+
   const pool = getPool();
   const poolStats = {
     totalCount: pool.totalCount,
@@ -31,6 +34,7 @@ export async function GET() {
 
   return NextResponse.json({
     status: isHealthy ? 'HEALTHY' : 'DEGRADED',
+    version: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 8) || 'dev',
     timestamp: new Date().toISOString(),
     uptimeSeconds: Math.floor(process.uptime()),
     latencyMs: totalLatency,
@@ -41,9 +45,14 @@ export async function GET() {
         engine: 'Neon Serverless PostgreSQL',
         pool: poolStats,
       },
+      realtimeOutbox: {
+        status: !redis.configured ? 'NOT_CONFIGURED' : redis.reachable ? 'UP' : 'DOWN',
+        latencyMs: redis.latencyMs,
+        engine: 'Upstash Redis',
+      },
       eventsStream: {
         status: 'UP',
-        protocol: 'Server-Sent Events (SSE)',
+        protocol: 'Server-Sent Events (SSE) + 20s cross-instance poll',
       },
       paymentGateway: {
         status: 'UP',

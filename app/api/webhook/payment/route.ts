@@ -2,17 +2,37 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getStore } from '@/lib/store';
 import { query } from '@/lib/db';
 import { processPayment } from '@/lib/services/payment.service';
+import { checkRateLimit } from '@/lib/security/rate-limiter';
 import crypto from 'crypto';
 
 // Secret key for payment webhook HMAC verification
 const WEBHOOK_SECRET = process.env.RAZORPAY_WEBHOOK_SECRET || 'whsec_milkflow_prod_demo_key_9812';
 
+// Only money-movement events are processed; everything else is acknowledged
+// without ledger mutation (prevents test/ping events from crediting invoices).
+const CREDITABLE_EVENTS = new Set(['payment.captured', 'order.paid']);
+
 export async function POST(req: NextRequest) {
   try {
+    const ip = req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || 'anonymous_ip';
+    const limitCheck = checkRateLimit(`webhook_${ip}`, 60, 60);
+    if (!limitCheck.allowed) {
+      return NextResponse.json(
+        { success: false, error: 'Too many webhook deliveries. Retrying later is safe (idempotent).' },
+        { status: 429, headers: { 'Retry-After': String(limitCheck.resetTimeSeconds) } }
+      );
+    }
     const rawBody = await req.text();
     const signature = req.headers.get('x-razorpay-signature') || req.headers.get('x-webhook-signature');
 
-    // Signature verification (if signature header provided)
+    // Signature verification is mandatory in production; in non-production
+    // unsigned demo payloads (existing tests) are still accepted.
+    if (process.env.NODE_ENV === 'production' && !signature) {
+      return NextResponse.json(
+        { success: false, error: 'Missing webhook HMAC signature' },
+        { status: 401 }
+      );
+    }
     if (signature) {
       const expectedSignature = crypto
         .createHmac('sha256', WEBHOOK_SECRET)
@@ -28,6 +48,12 @@ export async function POST(req: NextRequest) {
     }
 
     const payload = JSON.parse(rawBody);
+
+    // Acknowledge non-creditable Razorpay events without touching the ledger.
+    if (payload.event && !CREDITABLE_EVENTS.has(payload.event) && !payload.transactionRef) {
+      return NextResponse.json({ success: true, status: 'IGNORED', event: payload.event });
+    }
+
     let { transactionRef, invoiceId, amount, paymentMethod, note } = payload;
 
     // Support standard Razorpay webhook event payloads

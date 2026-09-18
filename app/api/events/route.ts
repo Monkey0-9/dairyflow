@@ -1,5 +1,5 @@
 import { decodeSession, SESSION_COOKIE_NAME } from '@/lib/auth';
-import { subscribeEvents, eventVisibleTo, getRecentEvents } from '@/lib/events';
+import { subscribeEvents, eventVisibleTo, getRecentEvents, readOutbox } from '@/lib/events';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -16,6 +16,26 @@ export async function GET(req: Request) {
     userId: session?.userId,
     role: session?.role,
   };
+
+  const url = new URL(req.url);
+  const isPoll = url.searchParams.get('poll') === 'true' || req.headers.get('accept')?.includes('application/json');
+  if (isPoll) {
+    const since = url.searchParams.get('since');
+    const sinceMs = since ? new Date(since).getTime() : 0;
+    // Merge in-memory history (same instance) with the Redis outbox
+    // (other serverless instances), dedupe, scope-filter, and sort.
+    const outbox = await readOutbox(scope.tenantId).catch(() => []);
+    const seen = new Set<string>();
+    const merged = [...getRecentEvents(50), ...outbox].filter((evt) => {
+      if (!eventVisibleTo(evt, scope)) return false;
+      if (since && !(new Date(evt.timestamp).getTime() > sinceMs)) return false;
+      const key = `${evt.type}|${evt.timestamp}|${JSON.stringify(evt.payload || {})}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }).sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+    return Response.json({ success: true, events: merged.slice(-20), timestamp: new Date().toISOString() });
+  }
 
   const stream = new ReadableStream({
     start(controller) {

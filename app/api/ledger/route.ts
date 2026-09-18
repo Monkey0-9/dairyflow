@@ -97,7 +97,7 @@ export async function PATCH(req: NextRequest) {
   try {
     const body = await req.json();
     const recordId = body.recordId || body.id;
-    const { deliveredQuantity, status, reason, notes, bottlesReturned, changedBy } = body;
+    const { deliveredQuantity, status, reason, notes, bottlesReturned, changedBy, clientUpdatedAt } = body;
 
     if (!recordId) {
       return NextResponse.json({ success: false, error: 'recordId is required' }, { status: 400 });
@@ -189,7 +189,12 @@ export async function PATCH(req: NextRequest) {
       payload: { recordId, status: updated.record.status, date: updated.record.date },
     });
 
-    return NextResponse.json({ success: true, record: updated.record });
+    return NextResponse.json({
+      success: true,
+      record: updated.record,
+      clientUpdatedAt: clientUpdatedAt || null,
+      conflictResolution: 'last-write-wins',
+    });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Failed to update delivery';
     return NextResponse.json({ success: false, error: message }, { status: 500 });
