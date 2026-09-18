@@ -23,14 +23,14 @@ MilkFlow 2.0 employs a comprehensive 4-tier testing hierarchy guaranteeing that 
 
 | Test Category | Command | Target File / Directory | Description |
 | :--- | :--- | :--- | :--- |
-| **Complete Test Suite** | `npm test` | `tests/**/*.test.ts*` | Runs all 25+ test suites (120+ tests) |
-| **Golden Business Flow** | `npx vitest run tests/acceptance/golden-business-flow.test.ts` | `golden-business-flow.test.ts` | 18-step E2E flow from signup to invoice and audit |
-| **Real PostgreSQL Integration** | `npx vitest run tests/integration/real-postgresql-pipeline.test.ts` | `real-postgresql-pipeline.test.ts` | Live Neon DB schema, constraints, and audit verification |
-| **Red Team Security** | `npx vitest run tests/security/red-team.test.ts` | `red-team.test.ts` | Forged sessions, IDOR, RBAC, webhook tampering |
-| **QR Hardening** | `npx vitest run tests/security/qr-hardening.test.ts` | `qr-hardening.test.ts` | Opaque QR tokens, cross-farmer scanning, revocation |
-| **Concurrency & Load** | `npx vitest run tests/system/concurrency-load-recovery.test.ts` | `concurrency-load-recovery.test.ts` | 100 simultaneous concurrent DB operations, p95 benchmarks |
-| **Observability Probes** | `npx vitest run tests/integration/observability.test.ts` | `observability.test.ts` | `/health`, `/ready`, `/live`, `/metrics` telemetry validation |
-| **Business Operations** | `npx vitest run tests/integration/business-intelligence-operations.test.ts` | `business-intelligence-operations.test.ts` | Inventory equations, statement balances, customer 360 |
+| **Complete Test Suite** | `npm test` | `tests/**/*.ts*` | Runs all 28 test suites (145 tests) |
+| **Golden Business Flow** | `npx vitest run tests/acceptance/golden-business-flow.ts` | `golden-business-flow.ts` | 18-step E2E flow from signup to invoice and audit |
+| **Real PostgreSQL Integration** | `npx vitest run tests/integration/real-postgresql-pipeline.ts` | `real-postgresql-pipeline.ts` | Live Neon DB schema, constraints, and audit verification |
+| **Red Team Security** | `npx vitest run tests/security/red-team.ts` | `red-team.ts` | Forged sessions, IDOR, RBAC, webhook tampering |
+| **QR Hardening** | `npx vitest run tests/security/qr-hardening.ts` | `qr-hardening.ts` | Opaque QR tokens, cross-farmer scanning, revocation |
+| **Concurrency & Load** | `npx vitest run tests/system/concurrency-load-recovery.ts` | `concurrency-load-recovery.ts` | 100 simultaneous concurrent DB operations, p95 benchmarks |
+| **Observability Probes** | `npx vitest run tests/integration/observability.ts` | `observability.ts` | `/health`, `/ready`, `/live`, `/metrics` telemetry validation |
+| **Business Operations** | `npx vitest run tests/integration/business-intelligence-operations.ts` | `business-intelligence-operations.ts` | Inventory equations, statement balances, customer 360 |
 
 ---
 

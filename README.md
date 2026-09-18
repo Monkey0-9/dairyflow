@@ -225,7 +225,7 @@ npm test
 ```
 
 ### Test Coverage Highlights:
-- **Security & Multi-Tenant Isolation** (`tests/security/multi-tenant-isolation.test.ts`):
+- **Security & Multi-Tenant Isolation** (`tests/security/multi-tenant-isolation.ts`):
   - Customer cross-tenant resource theft attempts -> 403 Forbidden.
   - Customer unauthorized farmer route access -> 403 Forbidden.
   - Cross-tenant farmer leakage -> Blocked.

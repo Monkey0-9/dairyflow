@@ -51,6 +51,6 @@
 ## 4. Periodic DR Drill Checklist
 - [x] Semi-annual restore drill executed on disposable database branch (`milkflow_staging_dr_test`).
 - [x] Verify foreign key constraints and unique indexes post-restore.
-- [x] Run full Golden Business Flow test suite (`tests/acceptance/golden-business-flow.test.ts`) against restored database.
+- [x] Run full Golden Business Flow test suite (`tests/acceptance/golden-business-flow.ts`) against restored database.
 - [x] Confirm cryptographic SHA-256 audit log continuity.
 - [x] Document drill sign-off and update incident escalation roster.

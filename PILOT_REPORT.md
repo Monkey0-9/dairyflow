@@ -34,7 +34,7 @@ Over the 4-week period, paper cards were completely retired. The delivery agents
 - **Observation**: In a low-connectivity building basement, delivery agent tapped "Mark Delivered" twice rapidly when the screen did not immediately update.
 - **Root Cause**: Touch event was not debounced locally, and in-memory queue processed two discrete drop mutations.
 - **Engineering Fix**: Added client-side idempotency UUID key (`operationId`) combined with database unique constraint on `(customer_id, date)`. Replays now update the existing drop instead of appending a second 2L record.
-- **Regression Test**: `tests/security/red-team.test.ts` & `tests/system/concurrency-load-recovery.test.ts`.
+- **Regression Test**: `tests/security/red-team.ts` & `tests/system/concurrency-load-recovery.ts`.
 
 ### Incident #2: Customer Doorstep QR Glare During Morning Sun
 - **Observation**: At 6:15 AM, early direct sunlight reflecting on laminated doorstep QR cards caused camera exposure blowout.
@@ -46,7 +46,7 @@ Over the 4-week period, paper cards were completely retired. The delivery agents
 - **Observation**: A customer scheduled a 5-day holiday pause after the draft monthly invoice was prepared, leading to a temporary ₹300 billing discrepancy.
 - **Root Cause**: Static invoice total calculation.
 - **Engineering Fix**: Implemented real-time dynamic invoice recalculation (`recalculateInvoice()`) and automatic credit note adjustments (`issueAdjustmentNote()`) that subtract approved pause dates up until final payment settlement.
-- **Regression Test**: `tests/acceptance/golden-business-flow.test.ts` (Step 9 & 10).
+- **Regression Test**: `tests/acceptance/golden-business-flow.ts` (Step 9 & 10).
 
 ---
 

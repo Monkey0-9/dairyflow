@@ -12,12 +12,12 @@
 | :--- | :--- | :---: |
 | **Build** | `npm run build` — 37/37 routes compiled successfully in 1.2s | **PASS** |
 | **Lint** | `npm run lint` — 0 errors across entire codebase | **PASS** |
-| **Unit tests** | `npm test` — 102 tests passed across 21 test suites | **PASS** |
-| **Integration tests** | `tests/system/*.test.ts` & `tests/acceptance/*.test.ts` passing | **PASS** |
+| **Unit tests** | `npm test` — 145 tests passed across 28 test suites | **PASS** |
+| **Integration tests** | `tests/system/*.ts` & `tests/acceptance/*.ts` passing | **PASS** |
 | **Database** | Neon PostgreSQL connection pool verified; `npx prisma contract format` (Exit 0) | **PASS** |
 | **Authentication** | Salted scrypt password hashing + HMAC-SHA256 signed sessions (`lib/auth.ts`) | **PASS** |
 | **Authorization** | Strict portal gates & role enforcement via `proxy.ts` (`/customer`, `/admin`, `/superadmin`) | **PASS** |
-| **Tenant isolation** | `tests/security/multi-tenant-isolation.test.ts` (GreenValley vs Sunrise Dairy) | **PASS** |
+| **Tenant isolation** | `tests/security/multi-tenant-isolation.ts` (GreenValley vs Sunrise Dairy) | **PASS** |
 | **Payments** | Dynamic UPI intent (`upi://pay`), Razorpay order generation (`/api/payments/create-order`) | **PASS** |
 | **Webhook** | HMAC signature verification + `UNIQUE(transaction_ref)` idempotency (`/api/webhook/payment`) | **PASS** |
 | **Ledger** | Finite State Machine (FSM), batch calendar query (`/api/ledger?from=...&to=...`) | **PASS** |
