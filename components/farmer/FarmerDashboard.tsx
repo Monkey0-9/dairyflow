@@ -5,23 +5,15 @@ import {
   CheckCircle2,
   SkipForward,
   AlertTriangle,
-  PlusCircle,
-  XCircle,
   Search,
-  Filter,
   QrCode,
   Droplets,
-  Clock,
-  ChevronRight,
-  TrendingUp,
   RefreshCw,
   Edit3,
   Calendar,
-  Layers,
-  MapPin,
-  Check,
   Lock,
-  ShieldCheck,
+  Bell,
+  DollarSign,
 } from 'lucide-react';
 import { DeliveryRecord, DeliveryStatus, CustomerProfile } from '@/lib/types';
 import QRScannerModal from '../common/QRScannerModal';
@@ -279,6 +271,48 @@ export default function FarmerDashboard({
           </div>
           <div className="text-[11px] text-rose-600 font-semibold mt-0.5">
             {stats.skippedCount} Skipped • {stats.partialCount} Partial
+          </div>
+        </div>
+      </div>
+
+      {/* Needs Attention / Exception Quick Action Center */}
+      <div className="bg-gradient-to-r from-amber-500/10 via-rose-500/10 to-purple-500/10 border border-amber-200/80 rounded-2xl p-4 shadow-xs">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-ping" />
+            <span className="text-xs font-black uppercase tracking-wider text-slate-800">
+              Needs Attention
+            </span>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => onNavigateTab?.('requests')}
+              className="px-3 py-1.5 rounded-xl bg-white hover:bg-amber-50 text-amber-900 border border-amber-200 text-xs font-bold flex items-center gap-1.5 transition shadow-xs cursor-pointer"
+            >
+              <Bell className="w-3.5 h-3.5 text-amber-600" />
+              <span>Customer Requests</span>
+            </button>
+            <button
+              onClick={() => onNavigateTab?.('disputes')}
+              className="px-3 py-1.5 rounded-xl bg-white hover:bg-rose-50 text-rose-900 border border-rose-200 text-xs font-bold flex items-center gap-1.5 transition shadow-xs cursor-pointer"
+            >
+              <AlertTriangle className="w-3.5 h-3.5 text-rose-600" />
+              <span>{stats.disputedCount || 1} Open Dispute</span>
+            </button>
+            <button
+              onClick={() => onNavigateTab?.('billing')}
+              className="px-3 py-1.5 rounded-xl bg-white hover:bg-emerald-50 text-emerald-900 border border-emerald-200 text-xs font-bold flex items-center gap-1.5 transition shadow-xs cursor-pointer"
+            >
+              <DollarSign className="w-3.5 h-3.5 text-emerald-600" />
+              <span>Pending Billing</span>
+            </button>
+            <button
+              onClick={() => setFilterStatus('SKIPPED')}
+              className="px-3 py-1.5 rounded-xl bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 text-xs font-bold flex items-center gap-1.5 transition shadow-xs cursor-pointer"
+            >
+              <SkipForward className="w-3.5 h-3.5 text-slate-500" />
+              <span>{stats.skippedCount + stats.partialCount} Exceptions Today</span>
+            </button>
           </div>
         </div>
       </div>

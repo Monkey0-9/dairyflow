@@ -1,0 +1,474 @@
+// MilkFlow Production Database Schema
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ---------------------------------------------------------
+// Multi-Tenancy & Identity
+// ---------------------------------------------------------
+
+model Tenant {
+  id          String   @id @default(uuid())
+  name        String
+  slug        String   @unique
+  contactEmail String?
+  contactPhone String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users                 User[]
+  farmerProfiles        FarmerProfile[]
+  customerProfiles      CustomerProfile[]
+  products              Product[]
+  subscriptions         Subscription[]
+  deliveryRecords       DeliveryRecord[]
+  pauseRequests         PauseRequest[]
+  extraMilkRequests     ExtraMilkRequest[]
+  quantityChangeRequests QuantityChangeRequest[]
+  disputes              Dispute[]
+  invoices              Invoice[]
+  payments              Payment[]
+  inventoryRecords      InventoryRecord[]
+  dayClosings           DayClosing[]
+  notifications         Notification[]
+  activityEvents        ActivityEvent[]
+  auditBlocks           AuditBlock[]
+
+  @@map("tenants")
+}
+
+model User {
+  id           String   @id @default(uuid())
+  tenantId     String
+  email        String   @unique
+  phone        String   @unique
+  name         String
+  passwordHash String
+  passwordSalt String
+  role         String   @default("CUSTOMER") // 'FARMER' | 'CUSTOMER' | 'SUPERADMIN'
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  tenant          Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  farmerProfile   FarmerProfile?
+  customerProfile CustomerProfile?
+  notifications   Notification[]
+  activityEvents  ActivityEvent[]
+
+  @@map("users")
+}
+
+model FarmerProfile {
+  id           String   @id @default(uuid())
+  userId       String   @unique
+  tenantId     String
+  businessName String
+  upiId        String
+  address      String
+  routeCode    String   @default("ROUTE-1")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant           Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customers        CustomerProfile[]
+  dayClosings      DayClosing[]
+  inventoryRecords InventoryRecord[]
+
+  @@map("farmer_profiles")
+}
+
+model CustomerProfile {
+  id              String   @id @default(uuid())
+  userId          String   @unique
+  tenantId        String
+  farmerId        String   // Crucial relation: Customer belongs to a specific Farmer!
+  deliveryAddress String
+  milkType        String   @default("Cow") // 'Cow' | 'Buffalo' | 'A2'
+  dailyQuantity   Float    @default(1.0)
+  qrToken         String   @unique
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user                  User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant                Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  farmer                FarmerProfile           @relation(fields: [farmerId], references: [id], onDelete: Cascade)
+  subscriptions         Subscription[]
+  deliveryRecords       DeliveryRecord[]
+  pauseRequests         PauseRequest[]
+  extraMilkRequests     ExtraMilkRequest[]
+  quantityChangeRequests QuantityChangeRequest[]
+  disputes              Dispute[]
+  invoices              Invoice[]
+  payments              Payment[]
+  qrIdentity            QRIdentity?
+
+  @@map("customer_profiles")
+}
+
+// ---------------------------------------------------------
+// Products & Subscriptions
+// ---------------------------------------------------------
+
+model Product {
+  id           String   @id @default(uuid())
+  tenantId     String
+  name         String
+  code         String   // 'COW' | 'BUFFALO' | 'A2'
+  unit         String   @default("L")
+  pricePerUnit Float
+  description  String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  tenant          Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  subscriptions   Subscription[]
+  deliveryRecords DeliveryRecord[]
+
+  @@unique([tenantId, code])
+  @@map("products")
+}
+
+model Subscription {
+  id         String    @id @default(uuid())
+  tenantId   String
+  customerId String
+  productId  String
+  farmerId   String
+  quantity   Float     @default(1.0)
+  frequency  String    @default("DAILY") // DAILY, ALTERNATE, CUSTOM
+  status     String    @default("ACTIVE") // ACTIVE, PAUSED, CANCELLED
+  startDate  DateTime  @default(now())
+  endDate    DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  tenant   Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer CustomerProfile @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  product  Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@map("subscriptions")
+}
+
+// ---------------------------------------------------------
+// Deliveries & Ledger
+// ---------------------------------------------------------
+
+model DeliveryRecord {
+  id                String    @id @default(uuid())
+  tenantId          String
+  customerId        String
+  farmerId          String
+  productId         String
+  date              String    // YYYY-MM-DD
+  scheduledQuantity Float
+  deliveredQuantity Float
+  pricePerUnit      Float     // Price locking invariant!
+  status            String    @default("EXPECTED") // 'EXPECTED' | 'DELIVERED' | 'PARTIAL' | 'SKIPPED' | 'EXTRA' | 'NOT_DELIVERED' | 'DISPUTED'
+  deliveredAt       DateTime?
+  notes             String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  tenant   Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer CustomerProfile @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  product  Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([customerId, date, productId])
+  @@index([farmerId, date])
+  @@index([tenantId, date])
+  @@map("delivery_records")
+}
+
+// ---------------------------------------------------------
+// Customer Requests (Vacation, Extra Milk, Quantity Change)
+// ---------------------------------------------------------
+
+model PauseRequest {
+  id            String    @id @default(uuid())
+  tenantId      String
+  customerId    String
+  farmerId      String
+  startDate     String    // YYYY-MM-DD
+  endDate       String    // YYYY-MM-DD
+  reason        String
+  status        String    @default("PENDING") // PENDING, APPROVED, REJECTED
+  decisionNotes String?
+  reviewedAt    DateTime?
+  createdAt     DateTime  @default(now())
+
+  tenant   Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer CustomerProfile @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([farmerId, status])
+  @@map("pause_requests")
+}
+
+model ExtraMilkRequest {
+  id            String    @id @default(uuid())
+  tenantId      String
+  customerId    String
+  farmerId      String
+  date          String    // YYYY-MM-DD
+  milkType      String
+  quantity      Float
+  notes         String?
+  status        String    @default("PENDING") // PENDING, APPROVED, REJECTED
+  decisionNotes String?
+  reviewedAt    DateTime?
+  createdAt     DateTime  @default(now())
+
+  tenant   Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer CustomerProfile @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([farmerId, status])
+  @@map("extra_milk_requests")
+}
+
+model QuantityChangeRequest {
+  id            String    @id @default(uuid())
+  tenantId      String
+  customerId    String
+  farmerId      String
+  effectiveDate String    // YYYY-MM-DD
+  newQuantity   Float
+  reason        String?
+  status        String    @default("PENDING") // PENDING, APPROVED, REJECTED
+  decisionNotes String?
+  reviewedAt    DateTime?
+  createdAt     DateTime  @default(now())
+
+  tenant   Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer CustomerProfile @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([farmerId, status])
+  @@map("quantity_change_requests")
+}
+
+// ---------------------------------------------------------
+// Disputes
+// ---------------------------------------------------------
+
+model Dispute {
+  id              String    @id @default(uuid())
+  tenantId        String
+  customerId      String
+  farmerId        String
+  deliveryId      String?
+  date            String    // YYYY-MM-DD
+  issueType       String    // 'NOT_DELIVERED' | 'WRONG_QUANTITY' | 'QUALITY_ISSUE' | 'BILLING_ERROR'
+  claimedQuantity Float?
+  status          String    @default("OPEN") // OPEN, RESOLVED, REJECTED
+  customerNotes   String
+  resolutionNotes String?
+  adjustedAmount  Float?
+  createdAt       DateTime  @default(now())
+  resolvedAt      DateTime?
+
+  tenant   Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer CustomerProfile @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([farmerId, status])
+  @@map("disputes")
+}
+
+// ---------------------------------------------------------
+// Billing & Payments
+// ---------------------------------------------------------
+
+model Invoice {
+  id                String        @id @default(uuid())
+  tenantId          String
+  customerId        String
+  farmerId          String
+  month             Int
+  year              Int
+  totalQuantity     Float
+  totalAmount       Float
+  paidAmount        Float         @default(0)
+  outstandingAmount Float         // Invariant: Math.max(0, totalAmount - paidAmount)
+  status            String        @default("UNPAID") // UNPAID, PARTIALLY_PAID, PAID
+  dueDate           DateTime
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  tenant   Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer CustomerProfile @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  items    InvoiceItem[]
+  payments Payment[]
+
+  @@unique([customerId, month, year]) // Invariant: exactly one invoice per customer-month-year
+  @@index([farmerId, status])
+  @@map("invoices")
+}
+
+model InvoiceItem {
+  id          String   @id @default(uuid())
+  invoiceId   String
+  date        String
+  description String
+  quantity    Float
+  rate        Float
+  amount      Float
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@map("invoice_items")
+}
+
+model Payment {
+  id             String   @id @default(uuid())
+  tenantId       String
+  invoiceId      String
+  customerId     String
+  farmerId       String
+  amount         Float
+  method         String   @default("UPI") // UPI, CASH, CARD, NETBANKING
+  transactionRef String   @unique // Database-enforced idempotency invariant!
+  status         String   @default("SUCCESS") // SUCCESS, PENDING, FAILED
+  paidAt         DateTime @default(now())
+  createdAt      DateTime @default(now())
+
+  tenant   Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  invoice  Invoice         @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  customer CustomerProfile @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@map("payments")
+}
+
+// ---------------------------------------------------------
+// Inventory & Day Closing
+// ---------------------------------------------------------
+
+model InventoryRecord {
+  id                 String   @id @default(uuid())
+  tenantId           String
+  farmerId           String
+  date               String   // YYYY-MM-DD
+  productCode        String
+  productionQuantity Float
+  deliveredQuantity  Float
+  wasteQuantity      Float    @default(0)
+  personalQuantity   Float    @default(0)
+  openingStock       Float    @default(0)
+  closingStock       Float    @default(0)
+  difference         Float    @default(0)
+  createdAt          DateTime @default(now())
+
+  tenant Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  farmer FarmerProfile @relation(fields: [farmerId], references: [id], onDelete: Cascade)
+
+  @@unique([farmerId, date, productCode])
+  @@map("inventory_records")
+}
+
+model DayClosing {
+  id              String   @id @default(uuid())
+  tenantId        String
+  farmerId        String
+  date            String   // YYYY-MM-DD
+  status          String   @default("FINALIZED") // OPEN, REVIEW, FINALIZED
+  totalProduction Float
+  totalDelivered  Float
+  totalWaste      Float
+  totalPersonal   Float
+  closingBalance  Float
+  variance        Float
+  lockedBy        String
+  lockedAt        DateTime @default(now())
+
+  tenant Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  farmer FarmerProfile @relation(fields: [farmerId], references: [id], onDelete: Cascade)
+
+  @@unique([farmerId, date])
+  @@map("day_closings")
+}
+
+// ---------------------------------------------------------
+// QR Identity
+// ---------------------------------------------------------
+
+model QRIdentity {
+  id           String    @id @default(uuid())
+  customerId   String    @unique
+  token        String    @unique // Opaque token invariant
+  status       String    @default("ACTIVE") // ACTIVE, REVOKED, EXPIRED
+  lastScannedAt DateTime?
+  createdAt    DateTime  @default(now())
+
+  customer CustomerProfile @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@map("qr_identities")
+}
+
+// ---------------------------------------------------------
+// Notifications & Platform Activity
+// ---------------------------------------------------------
+
+model Notification {
+  id        String   @id @default(uuid())
+  tenantId  String
+  userId    String
+  title     String
+  message   String
+  type      String   @default("INFO") // INFO, SUCCESS, WARNING, URGENT
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+  @@map("notifications")
+}
+
+model ActivityEvent {
+  id          String   @id @default(uuid())
+  tenantId    String
+  actorId     String
+  actorRole   String
+  action      String
+  description String
+  metadata    String?  // JSON string
+  createdAt   DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  actor  User   @relation(fields: [actorId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, createdAt])
+  @@map("activity_events")
+}
+
+// ---------------------------------------------------------
+// Cryptographic SHA-256 Audit Trail
+// ---------------------------------------------------------
+
+model AuditBlock {
+  id           String   @id @default(uuid())
+  tenantId     String
+  index        Int
+  timestamp    DateTime @default(now())
+  actorId      String
+  actorRole    String
+  entityType   String
+  entityId     String
+  action       String
+  beforeState  String?  // JSON string
+  afterState   String?  // JSON string
+  previousHash String
+  currentHash  String
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, index])
+  @@map("audit_blocks")
+}

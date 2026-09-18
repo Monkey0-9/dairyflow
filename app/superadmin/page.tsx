@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import AdminDashboard from '@/components/admin/AdminDashboard';
+import SuperAdminDashboard from '@/components/superadmin/SuperAdminDashboard';
 import { useRouter } from 'next/navigation';
 import { Droplets, LogOut, ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
@@ -54,9 +54,9 @@ export default function SuperAdminPage() {
         </div>
       </header>
 
-      {/* Main Admin Dashboard */}
+      {/* Dedicated SuperAdmin Platform Command Center */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        <AdminDashboard />
+        <SuperAdminDashboard />
       </main>
 
       {/* Footer */}

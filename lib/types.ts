@@ -1,4 +1,4 @@
-export type UserRole = 'FARMER' | 'CUSTOMER' | 'ADMIN';
+export type UserRole = 'FARMER' | 'CUSTOMER' | 'ADMIN' | 'SUPERADMIN';
 
 export type DeliveryStatus =
   | 'EXPECTED'

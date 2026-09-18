@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { decodeSession, SESSION_COOKIE_NAME } from './lib/auth';
+import { decodeSession, SESSION_COOKIE_NAME } from './lib/session';
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -74,7 +74,7 @@ export function middleware(request: NextRequest) {
 
   // SuperAdmin Route Gate (/superadmin/*)
   if (pathname.startsWith('/superadmin')) {
-    if (!session || session.role !== 'ADMIN') {
+    if (!session || (session.role !== 'ADMIN' && session.role !== 'SUPERADMIN')) {
       const loginUrl = new URL('/login', request.url);
       loginUrl.searchParams.set('redirect', pathname);
       return NextResponse.redirect(loginUrl);
