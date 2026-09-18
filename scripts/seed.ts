@@ -1,5 +1,5 @@
 // Seed Script for MilkFlow: Populates authoritative PostgreSQL database
-import { query, transaction } from '../lib/db';
+import { transaction } from '../lib/db';
 import { hashPassword } from '../lib/auth';
 import crypto from 'crypto';
 

@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
-import crypto from 'crypto';
 import { GET as getInvoicesHandler, POST as postInvoicesHandler } from '@/app/api/invoices/route';
 import { POST as postPaymentsHandler } from '@/app/api/payments/route';
 import { POST as postWebhookHandler } from '@/app/api/webhook/payment/route';

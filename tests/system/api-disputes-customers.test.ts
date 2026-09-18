@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
 import { GET as getCustomersHandler, POST as postCustomersHandler } from '@/app/api/customers/route';
-import { GET as getDisputesHandler, POST as postDisputesHandler, PATCH as patchDisputesHandler } from '@/app/api/disputes/route';
+import { POST as postDisputesHandler, PATCH as patchDisputesHandler } from '@/app/api/disputes/route';
 import { GET as getVacationsHandler, POST as postVacationsHandler } from '@/app/api/vacations/route';
 import { GET as verifyAuditHandler } from '@/app/api/audit/verify/route';
 import { resetTestStore } from '../setup';

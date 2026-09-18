@@ -112,7 +112,7 @@ export async function POST(req: NextRequest) {
           cutoff.setDate(cutoff.getDate() - daysThreshold);
           for (const inv of invoices) {
             if (inv.outstandingAmount > 0 && inv.status !== 'PAID') {
-              const due = new Date(inv.dueDate);
+              const due = inv.dueDate ? new Date(inv.dueDate) : new Date();
               if (daysThreshold === 0 || due <= cutoff) {
                 overdue.push({ customerName: inv.customerName || inv.customerId, amount: inv.outstandingAmount, month: inv.month, year: inv.year, phone: inv.customerPhone, customerId: inv.customerId });
               }

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { MilkFlowStore, getStore } from '@/lib/store';
+import { MilkFlowStore } from '@/lib/store';
 import { resetTestStore } from '../setup';
 
 describe('Component Testing: Store Core Domain Logic', () => {

@@ -1,4 +1,4 @@
-import { query, transaction } from '../db';
+import { transaction } from '../db';
 
 export interface ProcessPaymentParams {
   invoiceId: string;

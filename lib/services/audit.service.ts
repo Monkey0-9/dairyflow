@@ -43,8 +43,8 @@ export async function appendAuditLog(params: {
   entityType: string;
   entityId: string;
   action: string;
-  beforeState?: Record<string, any>;
-  afterState?: Record<string, any>;
+  beforeState?: Record<string, unknown>;
+  afterState?: Record<string, unknown>;
 }): Promise<AuditBlockRecord> {
   return transaction(async (client) => {
     // Get last block for this tenant
@@ -122,12 +122,41 @@ export async function verifyAuditChain(tenantId: string): Promise<{
   reason?: string;
 }> {
   try {
-    const res = await query<AuditBlockRecord>(
+    const res = await query<{
+      id: string;
+      tenant_id: string;
+      index: number;
+      timestamp: string | Date;
+      actor_id: string;
+      actor_role: string;
+      entity_type: string;
+      entity_id: string;
+      action: string;
+      before_state?: string | null;
+      after_state?: string | null;
+      previous_hash: string;
+      current_hash: string;
+    }>(
       `SELECT * FROM audit_blocks WHERE tenant_id = $1 ORDER BY index ASC`,
       [tenantId]
     );
 
-    const blocks = res.rows;
+    const blocks: AuditBlockRecord[] = res.rows.map((r) => ({
+      id: r.id,
+      tenantId: r.tenant_id,
+      index: Number(r.index),
+      timestamp: r.timestamp instanceof Date ? r.timestamp.toISOString() : String(r.timestamp),
+      actorId: r.actor_id,
+      actorRole: r.actor_role,
+      entityType: r.entity_type,
+      entityId: r.entity_id,
+      action: r.action,
+      beforeState: r.before_state,
+      afterState: r.after_state,
+      previousHash: r.previous_hash,
+      currentHash: r.current_hash,
+    }));
+
     if (blocks.length === 0) {
       return { valid: true, totalBlocks: 0 };
     }
@@ -138,8 +167,16 @@ export async function verifyAuditChain(tenantId: string): Promise<{
       // Check genesis or previous link
       if (i === 0) {
         // Genesis block
-        if (b.previousHash !== '0' && b.previousHash !== '0000000000000000000000000000000000000000000000000000000000000000') {
-          return { valid: false, totalBlocks: blocks.length, tamperedBlockIndex: 0, reason: 'Invalid genesis previous hash' };
+        if (
+          b.previousHash !== '0' &&
+          b.previousHash !== '0000000000000000000000000000000000000000000000000000000000000000'
+        ) {
+          return {
+            valid: false,
+            totalBlocks: blocks.length,
+            tamperedBlockIndex: 0,
+            reason: `Invalid genesis previous hash: ${b.previousHash}`,
+          };
         }
       } else {
         const prevBlock = blocks[i - 1];
@@ -155,8 +192,9 @@ export async function verifyAuditChain(tenantId: string): Promise<{
     }
 
     return { valid: true, totalBlocks: blocks.length };
-  } catch (err: any) {
-    console.error('[AuditService] verifyAuditChain error:', err);
-    return { valid: false, totalBlocks: 0, reason: err.message };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('[AuditService] verifyAuditChain error:', message);
+    return { valid: false, totalBlocks: 0, reason: message };
   }
 }

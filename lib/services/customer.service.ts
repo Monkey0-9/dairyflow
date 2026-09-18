@@ -1,5 +1,4 @@
 import { query } from '../db';
-import { CustomerProfile } from '../types';
 
 export interface DbCustomerProfile {
   id: string;
@@ -27,7 +26,7 @@ export async function getCustomersByFarmer(farmerId: string, tenantId?: string):
       JOIN users u ON c.user_id = u.id
       WHERE c.farmer_id = $1
     `;
-    const params: any[] = [farmerId];
+    const params: unknown[] = [farmerId];
     if (tenantId) {
       sql += ` AND c.tenant_id = $2`;
       params.push(tenantId);

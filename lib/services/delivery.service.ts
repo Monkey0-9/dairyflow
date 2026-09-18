@@ -1,5 +1,5 @@
 import { query } from '../db';
-import { DeliveryRecord, DeliveryStatus } from '../types';
+import { DeliveryStatus } from '../types';
 
 export interface LedgerQueryParams {
   farmerId?: string;
@@ -46,7 +46,7 @@ export async function getLedgerRange(params: LedgerQueryParams): Promise<DbDeliv
       LEFT JOIN products p ON d.product_id = p.id
       WHERE d.date >= $1 AND d.date <= $2
     `;
-    const queryParams: any[] = [params.fromDate, params.toDate];
+    const queryParams: unknown[] = [params.fromDate, params.toDate];
 
     if (params.farmerId) {
       queryParams.push(params.farmerId);
@@ -167,8 +167,9 @@ export async function updateDeliveryStatus(params: {
     }
 
     return { success: true };
-  } catch (err: any) {
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Failed to update delivery';
     console.error('[DeliveryService] updateDeliveryStatus error:', err);
-    return { success: false, error: err.message || 'Failed to update delivery' };
+    return { success: false, error: message };
   }
 }

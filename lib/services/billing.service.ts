@@ -1,5 +1,5 @@
 import { query, transaction } from '../db';
-import { Invoice, InvoiceStatus } from '../types';
+import { InvoiceStatus } from '../types';
 
 export interface DbInvoice {
   id: string;
@@ -13,15 +13,17 @@ export interface DbInvoice {
   paidAmount: number;
   outstandingAmount: number;
   status: InvoiceStatus;
-  dueDate: string;
+  dueDate?: string;
+  notes?: string;
+  generatedAt: string;
   customerName?: string;
   customerPhone?: string;
 }
 
 export async function getInvoices(params: {
+  tenantId?: string;
   farmerId?: string;
   customerId?: string;
-  tenantId?: string;
   month?: number;
   year?: number;
 }): Promise<DbInvoice[]> {
@@ -33,14 +35,14 @@ export async function getInvoices(params: {
              i.total_amount::float as "totalAmount",
              i.paid_amount::float as "paidAmount",
              i.outstanding_amount::float as "outstandingAmount",
-             i.status, i.due_date as "dueDate",
+             i.status, i.notes, i.due_date as "dueDate", i.generated_at as "generatedAt",
              u.name as "customerName", u.phone as "customerPhone"
       FROM invoices i
       JOIN customer_profiles c ON i.customer_id = c.id
       JOIN users u ON c.user_id = u.id
       WHERE 1=1
     `;
-    const queryParams: any[] = [];
+    const queryParams: unknown[] = [];
     if (params.farmerId) {
       queryParams.push(params.farmerId);
       sql += ` AND i.farmer_id = $${queryParams.length}`;

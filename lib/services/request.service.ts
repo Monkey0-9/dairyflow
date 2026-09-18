@@ -1,5 +1,4 @@
 import { query, transaction } from '../db';
-import { appendAuditLog } from './audit.service';
 
 export interface UnifiedRequest {
   id: string;
@@ -41,7 +40,7 @@ export async function getUnifiedRequests(params: {
       JOIN users u ON c.user_id = u.id
       WHERE 1=1
     `;
-    const pauseParams: any[] = [];
+    const pauseParams: unknown[] = [];
     if (params.farmerId) {
       pauseParams.push(params.farmerId);
       pauseSql += ` AND r.farmer_id = $${pauseParams.length}`;
@@ -85,7 +84,7 @@ export async function getUnifiedRequests(params: {
       JOIN users u ON c.user_id = u.id
       WHERE 1=1
     `;
-    const extraParams: any[] = [];
+    const extraParams: unknown[] = [];
     if (params.farmerId) {
       extraParams.push(params.farmerId);
       extraSql += ` AND r.farmer_id = $${extraParams.length}`;
@@ -129,7 +128,7 @@ export async function getUnifiedRequests(params: {
       JOIN users u ON c.user_id = u.id
       WHERE 1=1
     `;
-    const qtyParams: any[] = [];
+    const qtyParams: unknown[] = [];
     if (params.farmerId) {
       qtyParams.push(params.farmerId);
       qtySql += ` AND r.farmer_id = $${qtyParams.length}`;
