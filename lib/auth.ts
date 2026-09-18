@@ -170,3 +170,44 @@ export const PRESET_DEMO_USERS: Record<string, SessionUser> = {
     email: 'admin@milkflow.in',
   },
 };
+
+/**
+ * Extract authenticated session from NextRequest cookies or Authorization header.
+ */
+export function getSessionFromRequest(req: {
+  cookies: { get: (name: string) => { value?: string } | undefined };
+  headers: { get: (name: string) => string | null };
+}): SessionUser | null {
+  const cookie = req.cookies.get(SESSION_COOKIE_NAME)?.value;
+  if (cookie) {
+    const session = decodeSession(cookie);
+    if (session) return session;
+  }
+  const authHeader = req.headers.get('authorization');
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.slice(7);
+    const session = decodeSession(token);
+    if (session) return session;
+  }
+  return null;
+}
+
+/**
+ * Server-side session resolver for App Router routes.
+ */
+export async function getSessionUser(req?: {
+  cookies: { get: (name: string) => { value?: string } | undefined };
+  headers: { get: (name: string) => string | null };
+}): Promise<SessionUser | null> {
+  if (req) {
+    return getSessionFromRequest(req);
+  }
+  try {
+    const { cookies } = await import('next/headers');
+    const cookieStore = await cookies();
+    const token = cookieStore.get(SESSION_COOKIE_NAME)?.value;
+    return decodeSession(token);
+  } catch {
+    return null;
+  }
+}

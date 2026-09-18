@@ -111,6 +111,7 @@ export async function updateDeliveryStatus(params: {
   status: DeliveryStatus;
   deliveredQuantity: number;
   notes?: string;
+  bottlesReturned?: number;
 }): Promise<{ success: boolean; error?: string }> {
   try {
     const locked = await isDateLocked(params.farmerId, params.date);
@@ -150,19 +151,21 @@ export async function updateDeliveryStatus(params: {
       finalQty = 0.0;
     }
 
+    const bottles = typeof params.bottlesReturned === 'number' ? params.bottlesReturned : 0;
+
     if (params.deliveryId) {
       await query(
         `UPDATE delivery_records
-         SET status = $1, delivered_quantity = $2, notes = $3, delivered_at = NOW(), updated_at = NOW()
-         WHERE id = $4`,
-        [params.status, finalQty, params.notes || null, params.deliveryId]
+         SET status = $1, delivered_quantity = $2, notes = $3, bottles_returned = $4, delivered_at = NOW(), updated_at = NOW()
+         WHERE id = $5`,
+        [params.status, finalQty, params.notes || null, bottles, params.deliveryId]
       );
     } else {
       await query(
         `UPDATE delivery_records
-         SET status = $1, delivered_quantity = $2, notes = $3, delivered_at = NOW(), updated_at = NOW()
-         WHERE customer_id = $4 AND date = $5`,
-        [params.status, finalQty, params.notes || null, params.customerId, params.date]
+         SET status = $1, delivered_quantity = $2, notes = $3, bottles_returned = $4, delivered_at = NOW(), updated_at = NOW()
+         WHERE customer_id = $5 AND date = $6`,
+        [params.status, finalQty, params.notes || null, bottles, params.customerId, params.date]
       );
     }
 

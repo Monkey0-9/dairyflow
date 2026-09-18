@@ -321,6 +321,7 @@ async function migrate() {
     `CREATE INDEX IF NOT EXISTS idx_activity_tenant ON activity_events(tenant_id, created_at);`,
     `CREATE INDEX IF NOT EXISTS idx_pause_requests_farmer ON pause_requests(farmer_id, status);`,
     `CREATE INDEX IF NOT EXISTS idx_extra_requests_farmer ON extra_milk_requests(farmer_id, status);`,
+    `ALTER TABLE delivery_records ADD COLUMN IF NOT EXISTS bottles_returned INT DEFAULT 0;`,
   ];
 
   for (const ddl of ddlStatements) {
