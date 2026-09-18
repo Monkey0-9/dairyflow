@@ -89,9 +89,19 @@ export async function isDateLocked(farmerId: string, date: string): Promise<bool
   }
 }
 
+const VALID_TRANSITIONS: Record<DeliveryStatus, DeliveryStatus[]> = {
+  EXPECTED: ['DELIVERED', 'PARTIAL', 'SKIPPED', 'NOT_DELIVERED', 'EXTRA', 'DISPUTED'],
+  DELIVERED: ['PARTIAL', 'SKIPPED', 'EXTRA', 'DISPUTED'],
+  PARTIAL: ['DELIVERED', 'SKIPPED', 'EXTRA', 'DISPUTED'],
+  SKIPPED: ['DELIVERED', 'PARTIAL', 'DISPUTED'],
+  NOT_DELIVERED: ['DELIVERED', 'PARTIAL', 'SKIPPED', 'DISPUTED'],
+  EXTRA: ['DELIVERED', 'PARTIAL', 'DISPUTED'],
+  DISPUTED: ['DELIVERED', 'PARTIAL', 'SKIPPED', 'NOT_DELIVERED'],
+};
+
 /**
  * Record or update a delivery.
- * Enforces price locking and day closing invariants.
+ * Enforces legal state transitions, price locking, and day closing invariants.
  */
 export async function updateDeliveryStatus(params: {
   deliveryId?: string;
@@ -108,19 +118,51 @@ export async function updateDeliveryStatus(params: {
       return { success: false, error: 'Cannot modify delivery: Day has been finalized and locked.' };
     }
 
+    // Check existing record for FSM validation
+    let currentRecord: { id: string; status: DeliveryStatus; scheduled_quantity: number } | null = null;
+    if (params.deliveryId) {
+      const res = await query(
+        `SELECT id, status, scheduled_quantity::float as scheduled_quantity FROM delivery_records WHERE id = $1`,
+        [params.deliveryId]
+      );
+      if (res.rows.length > 0) currentRecord = res.rows[0] as unknown as { id: string; status: DeliveryStatus; scheduled_quantity: number };
+    } else {
+      const res = await query(
+        `SELECT id, status, scheduled_quantity::float as scheduled_quantity FROM delivery_records WHERE customer_id = $1 AND date = $2`,
+        [params.customerId, params.date]
+      );
+      if (res.rows.length > 0) currentRecord = res.rows[0] as unknown as { id: string; status: DeliveryStatus; scheduled_quantity: number };
+    }
+
+    if (currentRecord && currentRecord.status !== params.status) {
+      const allowed = VALID_TRANSITIONS[currentRecord.status] || [];
+      if (!allowed.includes(params.status)) {
+        return {
+          success: false,
+          error: `Illegal state transition from ${currentRecord.status} to ${params.status}`,
+        };
+      }
+    }
+
+    // Quantity invariants: SKIPPED and NOT_DELIVERED must have 0.0 delivered quantity
+    let finalQty = params.deliveredQuantity;
+    if (params.status === 'SKIPPED' || params.status === 'NOT_DELIVERED') {
+      finalQty = 0.0;
+    }
+
     if (params.deliveryId) {
       await query(
         `UPDATE delivery_records
          SET status = $1, delivered_quantity = $2, notes = $3, delivered_at = NOW(), updated_at = NOW()
          WHERE id = $4`,
-        [params.status, params.deliveredQuantity, params.notes || null, params.deliveryId]
+        [params.status, finalQty, params.notes || null, params.deliveryId]
       );
     } else {
       await query(
         `UPDATE delivery_records
          SET status = $1, delivered_quantity = $2, notes = $3, delivered_at = NOW(), updated_at = NOW()
          WHERE customer_id = $4 AND date = $5`,
-        [params.status, params.deliveredQuantity, params.notes || null, params.customerId, params.date]
+        [params.status, finalQty, params.notes || null, params.customerId, params.date]
       );
     }
 

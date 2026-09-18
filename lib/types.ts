@@ -17,7 +17,7 @@ export type DayOfWeek = 'MON' | 'TUE' | 'WED' | 'THU' | 'FRI' | 'SAT' | 'SUN';
 
 export type ProductCategory = 'MILK' | 'CURD' | 'GHEE' | 'PANEER' | 'BUTTER' | 'BUTTERMILK';
 
-export type InvoiceStatus = 'DRAFT' | 'ISSUED' | 'PARTIALLY_PAID' | 'PAID' | 'OVERDUE' | 'CANCELLED';
+export type InvoiceStatus = 'DRAFT' | 'ISSUED' | 'UNPAID' | 'PARTIALLY_PAID' | 'PAID' | 'OVERDUE' | 'CANCELLED';
 
 export type PaymentMethod = 'UPI' | 'CASH' | 'CARD' | 'NETBANKING';
 

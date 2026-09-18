@@ -97,21 +97,23 @@ export async function generateMonthlyInvoice(params: {
     const endStr = `${params.year}-${String(params.month).padStart(2, '0')}-31`;
 
     const delRes = await client.query(
-      `SELECT delivered_quantity::float as qty, price_per_unit::float as price
+      `SELECT id, date, delivered_quantity::float as qty, price_per_unit::float as price
        FROM delivery_records
-       WHERE customer_id = $1 AND date >= $2 AND date <= $3 AND status IN ('DELIVERED', 'PARTIAL', 'EXTRA')`,
+       WHERE customer_id = $1 AND date >= $2 AND date <= $3 AND status IN ('DELIVERED', 'PARTIAL', 'EXTRA')
+       ORDER BY date ASC`,
       [params.customerId, startStr, endStr]
     );
 
     let totalQuantity = 0;
     let totalAmount = 0;
-    for (const d of delRes.rows) {
-      totalQuantity += d.qty;
-      totalAmount += d.qty * d.price;
-    }
-
     const invoiceId = `INV_${params.customerId}_${params.year}_${params.month}`;
     const dueDate = new Date(params.year, params.month, 5); // 5th of next month
+
+    for (const d of delRes.rows) {
+      totalQuantity += d.qty;
+      const lineAmt = d.qty * d.price;
+      totalAmount += lineAmt;
+    }
 
     await client.query(
       `INSERT INTO invoices (id, tenant_id, customer_id, farmer_id, month, year, total_quantity, total_amount, paid_amount, outstanding_amount, status, due_date)
@@ -119,6 +121,63 @@ export async function generateMonthlyInvoice(params: {
       [invoiceId, params.tenantId, params.customerId, params.farmerId, params.month, params.year, totalQuantity, totalAmount, dueDate]
     );
 
+    // 3. Populate itemized invoice items
+    for (const d of delRes.rows) {
+      const lineAmt = d.qty * d.price;
+      const itemId = `ITEM_${d.id}_${Date.now()}`;
+      await client.query(
+        `INSERT INTO invoice_items (id, invoice_id, date, description, quantity, rate, amount)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [itemId, invoiceId, d.date, `Daily milk delivery on ${d.date}`, d.qty, d.price, lineAmt]
+      );
+    }
+
     return { success: true, invoiceId };
+  });
+}
+
+/**
+ * Authoritative recalculation of invoice amounts and payment status.
+ * Enforces the core accounting invariants:
+ * Total = sum(item quantity * item rate) - adjustments
+ * Outstanding = max(0, Total - sum(successful payments))
+ */
+export async function recalculateInvoice(invoiceId: string): Promise<{
+  totalQuantity: number;
+  totalAmount: number;
+  paidAmount: number;
+  outstandingAmount: number;
+  status: InvoiceStatus;
+}> {
+  return transaction(async (client) => {
+    // 1. Sum up all invoice items
+    const itemsRes = await client.query(
+      `SELECT COALESCE(SUM(quantity::float), 0) as "totalQuantity",
+              COALESCE(SUM(amount::float), 0) as "totalAmount"
+       FROM invoice_items WHERE invoice_id = $1`,
+      [invoiceId]
+    );
+    const totalQuantity = itemsRes.rows[0].totalQuantity;
+    const totalAmount = itemsRes.rows[0].totalAmount;
+
+    // 2. Sum up all successful payments
+    const payRes = await client.query(
+      `SELECT COALESCE(SUM(amount::float), 0) as "paidAmount"
+       FROM payments WHERE invoice_id = $1 AND status = 'SUCCESS'`,
+      [invoiceId]
+    );
+    const paidAmount = payRes.rows[0].paidAmount;
+    const outstandingAmount = Math.max(0, totalAmount - paidAmount);
+    const status: InvoiceStatus = outstandingAmount <= 0 ? 'PAID' : (paidAmount > 0 ? 'PARTIALLY_PAID' : 'UNPAID');
+
+    // 3. Update the invoice record atomically
+    await client.query(
+      `UPDATE invoices
+       SET total_quantity = $1, total_amount = $2, paid_amount = $3, outstanding_amount = $4, status = $5, updated_at = NOW()
+       WHERE id = $6`,
+      [totalQuantity, totalAmount, paidAmount, outstandingAmount, status, invoiceId]
+    );
+
+    return { totalQuantity, totalAmount, paidAmount, outstandingAmount, status };
   });
 }
