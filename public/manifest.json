@@ -1,0 +1,25 @@
+{
+  "name": "MilkFlow 2.0 — Dairy Delivery OS",
+  "short_name": "MilkFlow",
+  "description": "Enterprise dairy management and milk delivery platform",
+  "start_url": "/admin",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#ffffff",
+  "theme_color": "#10b981",
+  "icons": [
+    {
+      "src": "/globe.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/next.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

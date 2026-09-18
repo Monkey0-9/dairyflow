@@ -1,19 +1,47 @@
-  import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { getStore } from '@/lib/store';
 import { decodeSession, SESSION_COOKIE_NAME } from '@/lib/auth';
+import { getUnifiedRequests, handleRequestAction } from '@/lib/services/request.service';
+
+const isUnitTest = () => process.env.TEST_ENV === 'unit' || process.env.VITEST === 'true';
 
 export async function GET(req: NextRequest) {
   try {
-    const store = getStore();
     const token = req.cookies.get(SESSION_COOKIE_NAME)?.value;
     const session = decodeSession(token);
     const { searchParams } = new URL(req.url);
 
-    const farmerId = searchParams.get('farmerId') || (session?.role === 'FARMER' ? store.farmer.id : store.farmer.id);
+    const farmerId =
+      searchParams.get('farmerId') ||
+      session?.farmerId ||
+      (session?.role === 'FARMER' ? getStore().farmer.id : getStore().farmer.id);
 
+    if (!isUnitTest()) {
+      try {
+        const unified = await getUnifiedRequests({ farmerId });
+        if (unified.length > 0) {
+          const pauses = unified.filter((r) => r.type === 'PAUSE');
+          const extras = unified.filter((r) => r.type === 'EXTRA_MILK');
+          const qty = unified.filter((r) => r.type === 'QUANTITY_CHANGE');
+          return NextResponse.json({
+            success: true,
+            source: 'db',
+            vacationPauses: pauses,
+            extraMilkRequests: extras,
+            quantityChanges: qty,
+            requests: unified,
+          });
+        }
+      } catch (err) {
+        console.warn('[farmer/requests] DB read failed, falling back to store:', err);
+      }
+    }
+
+    const store = getStore();
     const requests = store.getFarmerRequests(farmerId);
     return NextResponse.json({
       success: true,
+      source: 'store',
       ...requests,
     });
   } catch (error: unknown) {
@@ -24,7 +52,6 @@ export async function GET(req: NextRequest) {
 
 export async function PATCH(req: NextRequest) {
   try {
-    const store = getStore();
     const token = req.cookies.get(SESSION_COOKIE_NAME)?.value;
     const session = decodeSession(token);
     const body = await req.json();
@@ -38,6 +65,35 @@ export async function PATCH(req: NextRequest) {
       );
     }
 
+    const normalized = String(action).toUpperCase();
+    const serviceAction = normalized === 'APPROVE' || normalized === 'APPROVED' ? 'APPROVE' : normalized === 'REJECT' || normalized === 'REJECTED' ? 'REJECT' : null;
+    if (!serviceAction) {
+      return NextResponse.json(
+        { success: false, error: 'action must be APPROVED or REJECTED' },
+        { status: 400 }
+      );
+    }
+
+    if (!isUnitTest()) {
+      try {
+        const result = await handleRequestAction(requestId, serviceAction, {
+          actorId: session?.userId || 'user_farmer',
+          actorRole: session?.role || 'FARMER',
+          tenantId: session?.tenantId || 'tenant_greenvalley',
+          notes: rejectionReason || note,
+        });
+        if (result.success) {
+          return NextResponse.json({ success: true, requestId, action: serviceAction, source: 'db' });
+        }
+        if (result.error && !result.error.startsWith('Request not found')) {
+          return NextResponse.json({ success: false, error: result.error }, { status: 400 });
+        }
+      } catch (err) {
+        console.warn('[farmer/requests] DB review failed, falling back to store:', err);
+      }
+    }
+
+    const store = getStore();
     const reviewerName = reviewedBy || session?.name || 'Suresh Patel (Farmer)';
 
     if (type === 'PAUSE' || requestId.startsWith('req_pause_')) {
@@ -52,11 +108,11 @@ export async function PATCH(req: NextRequest) {
         return NextResponse.json({ success: false, error: 'Pause request not found' }, { status: 404 });
       }
 
-      return NextResponse.json({ success: true, request: result });
+      return NextResponse.json({ success: true, request: result, source: 'store' });
     } else if (type === 'MILK' || requestId.startsWith('req_extra_')) {
       const result = store.reviewExtraMilkRequest({
         requestId,
-        action,
+        action: action as 'APPROVED' | 'REJECTED',
         reviewedBy: reviewerName,
         note: rejectionReason || note,
       });
@@ -65,7 +121,7 @@ export async function PATCH(req: NextRequest) {
         return NextResponse.json({ success: false, error: 'Milk request not found' }, { status: 404 });
       }
 
-      return NextResponse.json({ success: true, request: result });
+      return NextResponse.json({ success: true, request: result, source: 'store' });
     }
 
     return NextResponse.json(

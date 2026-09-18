@@ -175,6 +175,87 @@ export async function getUnifiedRequests(params: {
 }
 
 /**
+ * Resolve tenant/farmer ownership for a customer profile.
+ * Returns null when the customer profile cannot be found.
+ */
+async function resolveCustomerScope(customerId: string): Promise<{
+  tenantId: string;
+  farmerId: string;
+} | null> {
+  try {
+    const res = await query(
+      `SELECT tenant_id as "tenantId", farmer_id as "farmerId" FROM customer_profiles WHERE id = $1`,
+      [customerId]
+    );
+    if (res.rows.length === 0) return null;
+    return { tenantId: res.rows[0].tenantId, farmerId: res.rows[0].farmerId };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Create a vacation pause request directly in PostgreSQL.
+ * Used by POST /api/customer/pause-request (DB-first, transactional).
+ */
+export async function createPauseRequest(params: {
+  customerId: string;
+  farmerId?: string;
+  tenantId?: string;
+  startDate: string;
+  endDate: string;
+  reason?: string;
+}): Promise<{ success: boolean; id?: string; error?: string }> {
+  const scope = params.tenantId && params.farmerId
+    ? { tenantId: params.tenantId, farmerId: params.farmerId }
+    : await resolveCustomerScope(params.customerId);
+  if (!scope) return { success: false, error: 'Customer not found' };
+  try {
+    const id = `PR_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    await query(
+      `INSERT INTO pause_requests (id, tenant_id, customer_id, farmer_id, start_date, end_date, reason, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING')`,
+      [id, scope.tenantId, params.customerId, params.farmerId || scope.farmerId, params.startDate, params.endDate, params.reason || 'Vacation Pause requested by customer']
+    );
+    return { success: true, id };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Failed to create pause request';
+    return { success: false, error: message };
+  }
+}
+
+/**
+ * Create a one-off extra milk request directly in PostgreSQL.
+ * Used by POST /api/customer/milk-request (DB-first).
+ */
+export async function createExtraMilkRequest(params: {
+  customerId: string;
+  farmerId?: string;
+  tenantId?: string;
+  date: string;
+  milkType?: string;
+  quantity: number;
+  notes?: string;
+}): Promise<{ success: boolean; id?: string; error?: string }> {
+  const scope = params.tenantId && params.farmerId
+    ? { tenantId: params.tenantId, farmerId: params.farmerId }
+    : await resolveCustomerScope(params.customerId);
+  if (!scope) return { success: false, error: 'Customer not found' };
+  try {
+    const id = `EMR_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    await query(
+      `INSERT INTO extra_milk_requests (id, tenant_id, customer_id, farmer_id, date, milk_type, quantity, notes, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'PENDING')`,
+      [id, scope.tenantId, params.customerId, params.farmerId || scope.farmerId, params.date, params.milkType || 'Cow', params.quantity, params.notes || null]
+    );
+    return { success: true, id };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Failed to create extra milk request';
+    return { success: false, error: message };
+  }
+}
+
+/**
  * Approve or reject a request by ID.
  * When approved, applies changes to delivery ledger or subscriptions inside a transaction.
  */

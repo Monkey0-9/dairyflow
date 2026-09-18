@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   CheckCircle2,
   SkipForward,
@@ -18,6 +18,7 @@ import {
 import { DeliveryRecord, DeliveryStatus, CustomerProfile } from '@/lib/types';
 import QRScannerModal from '../common/QRScannerModal';
 import EndOfDayClosingModal from './EndOfDayClosingModal';
+import { useMilkFlowEvents, playNotificationChime } from '@/lib/use-milkflow-events';
 
 interface FarmerDashboardProps {
   selectedDate: string;
@@ -67,6 +68,30 @@ export default function FarmerDashboard({
   const [showQRScanner, setShowQRScanner] = useState(false);
   const [showClosingModal, setShowClosingModal] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
+  const [liveAttention, setLiveAttention] = useState(0);
+  const [liveFlash, setLiveFlash] = useState(false);
+
+  // Live updates: customer pauses / disputes / payments arrive via SSE
+  useMilkFlowEvents((evt) => {
+    if (
+      evt.type === 'request:created' ||
+      evt.type === 'dispute:opened' ||
+      evt.type === 'payment:received'
+    ) {
+      playNotificationChime();
+      setLiveAttention((n) => n + 1);
+      setLiveFlash(true);
+      onRefresh();
+      window.setTimeout(() => setLiveFlash(false), 2500);
+    }
+  });
+
+  useEffect(() => {
+    if (liveAttention > 0) {
+      const t = window.setTimeout(() => setLiveAttention(0), 60000);
+      return () => window.clearTimeout(t);
+    }
+  }, [liveAttention]);
 
   const handleConfirmCloseDay = async (formData: {
     cowMilkProduced: number;
@@ -283,6 +308,13 @@ export default function FarmerDashboard({
             <span className="text-xs font-black uppercase tracking-wider text-slate-800">
               Needs Attention
             </span>
+            {liveAttention > 0 && (
+              <span
+                className={`text-[11px] font-black px-2 py-0.5 rounded-full text-white transition-all ${liveFlash ? 'bg-rose-600 scale-110' : 'bg-amber-600'}`}
+              >
+                +{liveAttention} LIVE
+              </span>
+            )}
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <button

@@ -1,15 +1,80 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getStore } from '@/lib/store';
 import { decodeSession, SESSION_COOKIE_NAME } from '@/lib/auth';
+import { createExtraMilkRequest, getUnifiedRequests } from '@/lib/services/request.service';
+import { publishEvent } from '@/lib/events';
+
+const isUnitTest = () => process.env.TEST_ENV === 'unit' || process.env.VITEST === 'true';
 
 export async function POST(req: NextRequest) {
   try {
-    const store = getStore();
     const token = req.cookies.get(SESSION_COOKIE_NAME)?.value;
     const session = decodeSession(token);
     const body = await req.json();
 
     const targetCustomerId = body.customerId || session?.customerId;
+
+    const { date, requestedQuantity, quantity, reason, milkType, notes } = body;
+    const qtyRaw = requestedQuantity ?? quantity;
+
+    if (!date || qtyRaw === undefined || qtyRaw === null) {
+      return NextResponse.json(
+        { success: false, error: 'date and requestedQuantity are required' },
+        { status: 400 }
+      );
+    }
+
+    const qty = Number(qtyRaw);
+    if (isNaN(qty) || qty <= 0) {
+      return NextResponse.json(
+        { success: false, error: 'requestedQuantity must be a positive number' },
+        { status: 400 }
+      );
+    }
+
+    // DB-first path
+    if (!isUnitTest()) {
+      try {
+        const store = getStore();
+        const fallbackCust = targetCustomerId
+          ? store.customers.find(
+              (c) => c.id === targetCustomerId || (session && c.userId === session.userId)
+            )
+          : undefined;
+        const customerId = targetCustomerId || fallbackCust?.id;
+        if (customerId) {
+          const dbResult = await createExtraMilkRequest({
+            customerId,
+            farmerId: fallbackCust?.farmerId,
+            tenantId: session?.tenantId || fallbackCust?.tenantId,
+            date,
+            milkType: milkType || 'Cow',
+            quantity: qty,
+            notes: notes || reason || 'Extra milk requested by customer',
+          });
+          if (dbResult.success) {
+            publishEvent({
+              type: 'request:created',
+              tenantId: session?.tenantId,
+              farmerId: fallbackCust?.farmerId,
+              customerId,
+              payload: { requestId: dbResult.id, kind: 'EXTRA_MILK', date, quantity: qty },
+            });
+            return NextResponse.json(
+              { success: true, request: { id: dbResult.id, customerId, date, quantity: qty, status: 'PENDING' }, source: 'db' },
+              { status: 201 }
+            );
+          }
+          if (dbResult.error !== 'Customer not found') {
+            throw new Error(dbResult.error);
+          }
+        }
+      } catch (err) {
+        console.warn('[milk-request] DB insert failed, falling back to store:', err);
+      }
+    }
+
+    const store = getStore();
     const cust = store.customers.find(
       (c) => c.id === targetCustomerId || (session && c.userId === session.userId)
     );
@@ -21,23 +86,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { date, requestedQuantity, reason } = body;
-
-    if (!date || requestedQuantity === undefined || requestedQuantity === null) {
-      return NextResponse.json(
-        { success: false, error: 'date and requestedQuantity are required' },
-        { status: 400 }
-      );
-    }
-
-    const qty = Number(requestedQuantity);
-    if (isNaN(qty) || qty <= 0) {
-      return NextResponse.json(
-        { success: false, error: 'requestedQuantity must be a positive number' },
-        { status: 400 }
-      );
-    }
-
     const request = store.requestExtraMilk({
       customerId: cust.id,
       date,
@@ -46,7 +94,7 @@ export async function POST(req: NextRequest) {
       farmerId: cust.farmerId || store.farmer.id,
     });
 
-    return NextResponse.json({ success: true, request }, { status: 201 });
+    return NextResponse.json({ success: true, request, source: 'store' }, { status: 201 });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Internal server error';
     return NextResponse.json({ success: false, error: message }, { status: 500 });
@@ -55,7 +103,6 @@ export async function POST(req: NextRequest) {
 
 export async function GET(req: NextRequest) {
   try {
-    const store = getStore();
     const token = req.cookies.get(SESSION_COOKIE_NAME)?.value;
     const session = decodeSession(token);
     const { searchParams } = new URL(req.url);
@@ -68,8 +115,21 @@ export async function GET(req: NextRequest) {
       );
     }
 
+    if (!isUnitTest()) {
+      try {
+        const dbRequests = await getUnifiedRequests({ customerId });
+        const extras = dbRequests.filter((r) => r.type === 'EXTRA_MILK');
+        if (extras.length > 0) {
+          return NextResponse.json({ success: true, requests: extras, source: 'db' });
+        }
+      } catch (err) {
+        console.warn('[milk-request] DB read failed, falling back to store:', err);
+      }
+    }
+
+    const store = getStore();
     const requests = store.extraMilkRequests.filter((m) => m.customerId === customerId);
-    return NextResponse.json({ success: true, requests });
+    return NextResponse.json({ success: true, requests, source: 'store' });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Internal server error';
     return NextResponse.json({ success: false, error: message }, { status: 500 });

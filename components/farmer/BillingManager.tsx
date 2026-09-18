@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { Invoice, PaymentMethod } from '@/lib/types';
 import InvoiceModal from '../common/InvoiceModal';
+import { buildReminderMessage, buildWhatsAppLink } from '@/lib/reminders';
 
 interface BillingManagerProps {
   invoices: Invoice[];
@@ -120,11 +121,17 @@ export default function BillingManager({
     document.body.removeChild(link);
   };
 
-  // WhatsApp Bill Reminder
+  // WhatsApp Bill Reminder (multilingual via shared reminder templates)
+  const [reminderLang, setReminderLang] = useState<'en' | 'hi' | 'mr'>('en');
   const handleSendWhatsAppReminder = (inv: Invoice) => {
-    const text = `Namaste ${inv.customerName}, Greetings from GreenValley Dairy Farm! 🥛%0A%0AYour milk bill for ${inv.monthName} is ready:%0ATotal Milk: ${inv.totalQuantity} L%0ATotal Bill: ₹${inv.totalAmount}%0APreviously Paid: ₹${inv.paidAmount}%0ABalance Due: ₹${inv.outstandingAmount}%0A%0APlease pay via UPI to: greenvalley@okaxis%0AThank you for choosing farm fresh milk!`;
-    const cleanPhone = inv.customerPhone.replace(/[^0-9]/g, '');
-    window.open(`https://wa.me/${cleanPhone}?text=${text}`, '_blank');
+    const message = buildReminderMessage({
+      customerName: inv.customerName,
+      dairyName: 'GreenValley Dairy Farm',
+      amount: inv.outstandingAmount,
+      lang: reminderLang,
+      payLink: 'greenvalley@okaxis',
+    });
+    window.open(buildWhatsAppLink(inv.customerPhone, message), '_blank');
   };
 
   return (
@@ -142,6 +149,18 @@ export default function BillingManager({
         </div>
 
         <div className="flex items-center gap-2 w-full sm:w-auto">
+          <div className="flex items-center gap-1 text-[11px] font-bold text-slate-500">
+            <span>Reminder:</span>
+            {(['en', 'hi', 'mr'] as const).map((l) => (
+              <button
+                key={l}
+                onClick={() => setReminderLang(l)}
+                className={`px-2 py-1 rounded-lg border ${reminderLang === l ? 'bg-slate-900 text-white border-slate-900' : 'border-slate-200 text-slate-600'}`}
+              >
+                {l === 'en' ? 'EN' : l === 'hi' ? 'हिं' : 'मर'}
+              </button>
+            ))}
+          </div>
           <button
             onClick={onRecalculateAll}
             className="flex-1 sm:flex-initial px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold flex items-center justify-center gap-2 shadow-xs transition"

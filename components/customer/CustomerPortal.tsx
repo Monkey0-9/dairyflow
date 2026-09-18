@@ -33,6 +33,7 @@ import {
 } from '@/lib/types';
 import InvoiceModal from '../common/InvoiceModal';
 import ReceiptModal from '../common/ReceiptModal';
+import { useMilkFlowEvents, playNotificationChime } from '@/lib/use-milkflow-events';
 
 interface CustomerPortalProps {
   currentUserId: string;
@@ -61,6 +62,9 @@ export default function CustomerPortal({
   const [payAmount, setPayAmount] = useState<string>('');
   const [payMethod, setPayMethod] = useState<PaymentMethod>('UPI');
   const [isPaying, setIsPaying] = useState(false);
+  const [upiUri, setUpiUri] = useState<string>('');
+  const [razorOrderId, setRazorOrderId] = useState<string>('');
+  const [orderSandbox, setOrderSandbox] = useState(true);
 
   // Issue Reporting Form
   const [issueDate, setIssueDate] = useState('2026-09-16');
@@ -127,6 +131,35 @@ export default function CustomerPortal({
     fetchCustomerDetails();
   }, [currentCustomer?.id, currentUserId]);
 
+  // Live updates: farmer approvals / delivery changes arrive via SSE
+  const [liveNotice, setLiveNotice] = useState<string | null>(null);
+  useMilkFlowEvents((evt) => {
+    if (
+      evt.type === 'request:approved' ||
+      evt.type === 'request:rejected' ||
+      evt.type === 'delivery:updated' ||
+      evt.type === 'payment:received' ||
+      evt.type === 'dispute:resolved' ||
+      evt.type === 'invoice:created'
+    ) {
+      playNotificationChime();
+      setLiveNotice(
+        evt.type === 'request:approved'
+          ? 'Your request was approved by the dairy.'
+          : evt.type === 'request:rejected'
+            ? 'The dairy updated your request.'
+            : evt.type === 'delivery:updated'
+              ? "Today's delivery was updated."
+              : evt.type === 'payment:received'
+                ? 'Payment received. Thank you!'
+                : 'Account updated by the dairy.'
+      );
+      fetchCustomerDetails();
+      onRefreshAll();
+      window.setTimeout(() => setLiveNotice(null), 6000);
+    }
+  });
+
   // Generate QR Code
   useEffect(() => {
     if (currentCustomer) {
@@ -142,6 +175,38 @@ export default function CustomerPortal({
       });
     }
   }, [currentCustomer]);
+
+  const orderInvoicePreview: Invoice | undefined =
+    customerData?.invoices?.find((i: Invoice) => i.month === 9 && i.year === 2026) ||
+    customerData?.invoices?.[0];
+
+  // Fetch Razorpay order + dynamic UPI deep-link whenever pay modal opens
+  useEffect(() => {
+    if (!showPayModal || !orderInvoicePreview || !payAmount) return;
+    const invoiceId = orderInvoicePreview.id;
+    const amount = payAmount;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/payments/create-order', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ invoiceId, amount: parseFloat(amount) }),
+        });
+        const data = await res.json();
+        if (!cancelled && data.success) {
+          setUpiUri(data.upi?.uri || '');
+          setRazorOrderId(data.order?.id || '');
+          setOrderSandbox(Boolean(data.sandbox));
+        }
+      } catch {
+        // offline — UPI intent unavailable, card/manual flow still works
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [showPayModal, payAmount, orderInvoicePreview?.id]);
 
   if (loading || !customerData) {
     return (
@@ -254,8 +319,8 @@ export default function CustomerPortal({
           invoiceId: latestInvoice.id,
           amount: parseFloat(payAmount),
           paymentMethod: payMethod,
-          transactionRef: `UPI-${Date.now()}`,
-          note: `Online payment via ${payMethod}`,
+          transactionRef: razorOrderId ? `UPI-${razorOrderId}` : `UPI-${Date.now()}`,
+          note: `Online payment via ${payMethod}${razorOrderId ? ` order ${razorOrderId}` : ''}`,
         }),
       });
       const data = await res.json();
@@ -281,6 +346,12 @@ export default function CustomerPortal({
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto pb-16">
+      {liveNotice && (
+        <div className="bg-emerald-600 text-white text-xs font-bold px-4 py-2.5 rounded-2xl shadow flex items-center gap-2 animate-pulse">
+          <span className="inline-block w-2 h-2 rounded-full bg-white" />
+          Live update: {liveNotice}
+        </div>
+      )}
       {/* Welcome Banner */}
       <div className="bg-gradient-to-r from-emerald-800 to-teal-700 text-white p-6 sm:p-8 rounded-3xl shadow-lg relative overflow-hidden">
         <div className="relative z-10 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -1203,8 +1274,18 @@ export default function CustomerPortal({
 
               <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 flex items-center gap-2 text-[11px] text-slate-600">
                 <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span>256-bit SSL encrypted • Instant webhook ledger verification</span>
+                <span>256-bit SSL encrypted • Instant webhook ledger verification{orderSandbox ? ' • Sandbox order' : ' • Razorpay order'}</span>
               </div>
+
+              {upiUri ? (
+                <a
+                  href={upiUri}
+                  className="w-full py-3 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-sm font-bold transition flex items-center justify-center gap-2"
+                >
+                  <span>Pay with UPI App (GPay / PhonePe / Paytm)</span>
+                  <ArrowRight className="w-4 h-4" />
+                </a>
+              ) : null}
 
               <button
                 type="submit"

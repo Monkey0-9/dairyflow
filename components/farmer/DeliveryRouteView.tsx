@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   MapPin,
   Navigation,
@@ -16,6 +16,12 @@ import {
   Milestone,
 } from 'lucide-react';
 import { CustomerProfile, DeliveryRecord } from '@/lib/types';
+import {
+  queueDeliveryMutation,
+  listQueuedMutations,
+  flushOfflineQueue,
+  registerServiceWorker,
+} from '@/lib/offline-sync';
 
 interface DeliveryRouteViewProps {
   customers: CustomerProfile[];
@@ -35,6 +41,67 @@ export default function DeliveryRouteView({
   );
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [optimizedNotice, setOptimizedNotice] = useState(false);
+  const [isOffline, setIsOffline] = useState(false);
+  const [pendingSync, setPendingSync] = useState(0);
+  const [syncNotice, setSyncNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    registerServiceWorker();
+    const update = () => setIsOffline(!navigator.onLine);
+    update();
+    listQueuedMutations()
+      .then((q) => setPendingSync(q.length))
+      .catch(() => undefined);
+    const drain = async () => {
+      setIsOffline(false);
+      const { flushed, remaining } = await flushOfflineQueue().catch(() => ({
+        flushed: 0,
+        remaining: 0,
+      }));
+      setPendingSync(remaining);
+      if (flushed > 0) {
+        setSyncNotice(`Back online — synced ${flushed} queued deliver${flushed === 1 ? 'y' : 'ies'}.`);
+        window.setTimeout(() => setSyncNotice(null), 5000);
+      }
+    };
+    window.addEventListener('offline', update);
+    window.addEventListener('online', drain);
+    return () => {
+      window.removeEventListener('offline', update);
+      window.removeEventListener('online', drain);
+    };
+  }, []);
+
+  const handleDrop = async (record: DeliveryRecord) => {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      await queueDeliveryMutation({
+        recordId: record.id,
+        customerId: record.customerId,
+        date: record.date,
+        deliveredQuantity: record.scheduledQuantity,
+        status: 'DELIVERED',
+      }).catch(() => undefined);
+      setPendingSync((n) => n + 1);
+      return;
+    }
+    onQuickDeliver(record);
+  };
+
+  const handleSkip = async (record: DeliveryRecord) => {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      await queueDeliveryMutation({
+        recordId: record.id,
+        customerId: record.customerId,
+        date: record.date,
+        deliveredQuantity: 0,
+        status: 'SKIPPED',
+        reason: 'Skipped offline on route',
+      }).catch(() => undefined);
+      setPendingSync((n) => n + 1);
+      return;
+    }
+    onQuickSkip(record);
+  };
 
   // Simulate AI Route Optimization (TSP nearest-neighbor heuristic)
   const handleOptimizeRoute = () => {
@@ -65,6 +132,22 @@ export default function DeliveryRouteView({
 
   return (
     <div className="space-y-6">
+      {isOffline && (
+        <div className="p-3 rounded-2xl bg-slate-900 text-white text-xs font-bold flex items-center gap-2">
+          <span className="inline-block w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+          Offline Mode Active — drops are queued locally{pendingSync > 0 ? ` (${pendingSync} pending)` : ''} and auto-sync on reconnect.
+        </div>
+      )}
+      {!isOffline && pendingSync > 0 && (
+        <div className="p-3 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-bold">
+          {pendingSync} queued deliver{pendingSync === 1 ? 'y' : 'ies'} awaiting sync…
+        </div>
+      )}
+      {syncNotice && (
+        <div className="p-3 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-bold">
+          {syncNotice}
+        </div>
+      )}
       {/* Header Bar */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-5 rounded-3xl border border-slate-200 shadow-xs">
         <div>
@@ -230,13 +313,13 @@ export default function DeliveryRouteView({
                       {record && (
                         <div className="flex items-center gap-1.5 mt-1">
                           <button
-                            onClick={() => onQuickDeliver(record)}
+                            onClick={() => void handleDrop(record)}
                             className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[11px] font-bold shadow-xs transition"
                           >
                             ✓ Drop
                           </button>
                           <button
-                            onClick={() => onQuickSkip(record)}
+                            onClick={() => void handleSkip(record)}
                             className="px-2.5 py-1 bg-slate-100 hover:bg-rose-50 text-slate-700 hover:text-rose-800 rounded-lg text-[11px] font-bold transition"
                           >
                             Skip

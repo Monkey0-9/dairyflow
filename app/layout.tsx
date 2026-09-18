@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -16,6 +16,12 @@ export const metadata: Metadata = {
   title: "MilkFlow — Digital Milk Management & Billing System",
   description:
     "Automated subscription-based digital milk ledger, real-time delivery tracking, exception handling, automated monthly billing, and integrated payments for dairy farmers.",
+  manifest: "/manifest.json",
+  appleWebApp: { capable: true, title: "MilkFlow", statusBarStyle: "default" },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#10b981",
 };
 
 export default function RootLayout({

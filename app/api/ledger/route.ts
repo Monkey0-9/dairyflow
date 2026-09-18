@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getStore } from '@/lib/store';
 import { query } from '@/lib/db';
 import { getLedgerRange } from '@/lib/services/delivery.service';
+import { publishEvent } from '@/lib/events';
 
 export async function GET(req: NextRequest) {
   try {
@@ -145,6 +146,13 @@ export async function PATCH(req: NextRequest) {
     } catch {
       // Non-blocking in isolated tests
     }
+
+    publishEvent({
+      type: 'delivery:updated',
+      tenantId: updated.record.tenantId,
+      customerId: updated.record.customerId,
+      payload: { recordId, status: updated.record.status, date: updated.record.date },
+    });
 
     return NextResponse.json({ success: true, record: updated.record });
   } catch (error: unknown) {

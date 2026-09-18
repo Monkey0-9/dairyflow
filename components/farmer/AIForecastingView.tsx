@@ -15,10 +15,12 @@ import {
   ShieldAlert,
 } from 'lucide-react';
 import { ComprehensiveForecast } from '@/lib/ai-forecasting';
+import AICopilotModal from './AICopilotModal';
 
 export default function AIForecastingView() {
   const [forecast, setForecast] = useState<ComprehensiveForecast | null>(null);
   const [loading, setLoading] = useState(true);
+  const [showCopilot, setShowCopilot] = useState(false);
 
   useEffect(() => {
     fetch('/api/forecast')
@@ -59,11 +61,19 @@ export default function AIForecastingView() {
         </div>
 
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowCopilot(true)}
+            className="text-xs bg-slate-900 hover:bg-slate-700 text-white px-3 py-1.5 rounded-full font-bold flex items-center gap-1.5 transition"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-emerald-300" />
+            Ask AI Copilot
+          </button>
           <span className="text-xs bg-amber-50 text-amber-900 border border-amber-200 px-3 py-1 rounded-full font-bold">
             Target: Tomorrow (17 Sep 2026)
           </span>
         </div>
       </div>
+      {showCopilot && <AICopilotModal onClose={() => setShowCopilot(false)} />}
 
       {/* Main Tomorrow Prediction Hero Card */}
       <div className="bg-gradient-to-br from-emerald-900 via-slate-900 to-slate-950 text-white rounded-3xl p-6 sm:p-8 shadow-xl relative overflow-hidden">

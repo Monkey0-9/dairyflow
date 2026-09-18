@@ -8,7 +8,6 @@ The authoritative database is hosted on **PostgreSQL (Neon Serverless)** with co
 
 ## Entity Relationship Summary
 
-```
                       tenants
                          │
         ┌────────────────┼────────────────┐
@@ -32,7 +31,6 @@ farmer    customer ◄─────┼────── subscriptions
    │
    ├── inventory_records
    └── day_closings
-```
 
 ---
 
