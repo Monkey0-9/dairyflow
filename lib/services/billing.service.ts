@@ -35,7 +35,7 @@ export async function getInvoices(params: {
              i.total_amount::float as "totalAmount",
              i.paid_amount::float as "paidAmount",
              i.outstanding_amount::float as "outstandingAmount",
-             i.status, i.notes, i.due_date as "dueDate", i.generated_at as "generatedAt",
+             i.status, NULL::text as notes, i.due_date as "dueDate", i.created_at as "generatedAt",
              u.name as "customerName", u.phone as "customerPhone"
       FROM invoices i
       JOIN customer_profiles c ON i.customer_id = c.id
