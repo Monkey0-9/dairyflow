@@ -206,6 +206,14 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
+
+    // Production path: PostgreSQL is the source of truth (UUID ids, real
+    // tenant/farmer scope, explicit duplicate checks, loud failures).
+    // Test path below is preserved verbatim for automated suites.
+    if (!isTest) {
+      return await createCustomerDurable(session, body);
+    }
+
     const store = getStore();
 
     if (!body.name || !body.phone || !body.productId || !body.quantity) {
@@ -496,6 +504,118 @@ export async function PATCH(req: NextRequest) {
     });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Failed to update customer';
+    return NextResponse.json({ success: false, error: message }, { status: 500 });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Durable production paths: PostgreSQL-first. The in-memory store starts
+// EMPTY in production (no demo data), so store-first lookups 404 on real
+// DB rows and store-only writes vanish on restart. These helpers write the
+// database first, fail loudly on error, and only then mirror into the store.
+// ---------------------------------------------------------------------------
+
+async function createCustomerDurable(session: { userId: string; tenantId: string } | null, body: any) {
+  try {
+    const scope = await resolveDbScope(session as any);
+
+    const qty = parseFloat(body.quantity);
+    if (isNaN(qty) || qty <= 0) {
+      return NextResponse.json({ success: false, error: 'quantity must be a positive number' }, { status: 400 });
+    }
+
+    // Farmer scope: body value only when it is a real farmer of this tenant.
+    let farmerId = scope.farmerId;
+    if (isUuid(body.farmerId)) {
+      const f = await query(`SELECT id FROM farmer_profiles WHERE id = $1 AND tenant_id = $2`, [body.farmerId, scope.tenantId]);
+      if (f.rows.length > 0) farmerId = body.farmerId;
+    }
+
+    // Product must be a real product row (delivery_records.product_id is FK).
+    let product: { id: string; code: string; basePrice: number | null } | null = null;
+    if (isUuid(body.productId)) {
+      const p = await query(
+        `SELECT id, code, price_per_unit as "basePrice" FROM products WHERE id = $1 AND tenant_id = $2`,
+        [body.productId, scope.tenantId]
+      );
+      if (p.rows.length > 0) product = p.rows[0] as { id: string; code: string; basePrice: number | null };
+    }
+    if (!product) {
+      const p = await query(
+        `SELECT id, code, price_per_unit as "basePrice" FROM products WHERE tenant_id = $1 AND is_active = true ORDER BY created_at ASC LIMIT 1`,
+        [scope.tenantId]
+      );
+      if (p.rows.length === 0) {
+        return NextResponse.json({ success: false, error: 'No products configured for this dairy. Add a product first.' }, { status: 400 });
+      }
+      product = p.rows[0] as { id: string; code: string; basePrice: number | null };
+    }
+    const unitPrice = body.customPrice ? parseFloat(body.customPrice) : (product.basePrice ?? 50.0);
+
+    const email = body.email ? String(body.email).trim().toLowerCase() : `${String(body.phone).replace(/[^0-9]/g, '') || Date.now()}@dairyclient.com`;
+
+    // Explicit duplicate check — never silently drop on conflict.
+    const dup = await query(`SELECT id FROM users WHERE phone = $1 OR email = $2 LIMIT 1`, [body.phone, email]);
+    if (dup.rows.length > 0) {
+      return NextResponse.json(
+        { success: false, error: 'A user with this phone number or email already exists.' },
+        { status: 409 }
+      );
+    }
+
+    const userId = newUuid();
+    const customerId = newUuid();
+    const rawToken = generateRawInvitationToken();
+    const tokenHash = hashInvitationToken(rawToken);
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    const todayStr = new Date().toISOString().split('T')[0];
+
+    await query(
+      `INSERT INTO users (id, tenant_id, email, phone, name, password_hash, password_salt, role, is_active)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'CUSTOMER', false)`,
+      [userId, scope.tenantId, email, body.phone, body.name, 'INVITED_PENDING_ACTIVATION', 'salt_temp']
+    );
+    await query(
+      `INSERT INTO customer_profiles (id, user_id, tenant_id, farmer_id, delivery_address, milk_type, daily_quantity, qr_token, is_active)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false)`,
+      [customerId, userId, scope.tenantId, farmerId, body.address || 'Local Residence', product.code, qty, `MK_QR_${newUuid().replace(/-/g, '').substring(0, 16)}`]
+    );
+    await query(
+      `INSERT INTO customer_invitations (id, customer_id, token_hash, channel, expires_at, created_by_id, created_at)
+       VALUES (gen_random_uuid(), $1, $2, 'SMS', $3, $4, NOW())`,
+      [customerId, tokenHash, expiresAt.toISOString(), session?.userId || userId]
+    );
+    await query(
+      `INSERT INTO subscriptions (id, tenant_id, customer_id, product_id, farmer_id, quantity, frequency, status)
+       VALUES ($1, $2, $3, $4, $5, $6, 'DAILY', 'ACTIVE')`,
+      [newUuid(), scope.tenantId, customerId, product.id, farmerId, qty]
+    );
+    await query(
+      `INSERT INTO delivery_records (id, tenant_id, customer_id, farmer_id, product_id, date, scheduled_quantity, delivered_quantity, price_per_unit, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'EXPECTED')
+       ON CONFLICT (customer_id, date, product_id) DO NOTHING`,
+      [newUuid(), scope.tenantId, customerId, farmerId, product.id, todayStr, qty, qty, unitPrice]
+    );
+
+    // Mirror into the read cache so subsequent reads are consistent.
+    try {
+      await syncDbCustomersIntoStore();
+    } catch {
+      // Non-fatal: next GET re-syncs.
+    }
+    const store = getStore();
+    const cached = store.customers.find((c) => c.id === customerId);
+
+    return NextResponse.json({
+      success: true,
+      customer: cached || { id: customerId, name: body.name, phone: body.phone, email, farmerId, tenantId: scope.tenantId },
+      invitationToken: rawToken,
+      invitationLink: `/activate?token=${rawToken}`,
+      credentials: { email, phone: body.phone, loginUrl: '/login' },
+    }, { status: 201 });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Failed to add customer';
+    console.error('[Customer API POST] durable write failed:', error);
     return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
 }
