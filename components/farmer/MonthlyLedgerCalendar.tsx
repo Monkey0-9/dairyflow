@@ -39,6 +39,9 @@ export default function MonthlyLedgerCalendar({
   const [showDayModal, setShowDayModal] = useState<boolean>(false);
   const [monthCache, setMonthCache] = useState<Record<string, DeliveryRecord[]>>({});
   const [loading, setLoading] = useState(false);
+  // Failed quick-edits surface here; local rows only change after the server
+  // confirms, so a failed save can never look saved.
+  const [dayError, setDayError] = useState<string | null>(null);
 
   // Month days: September 2026 has 30 days. Sep 1 2026 is Tuesday.
   const daysInMonth = Array.from({ length: 30 }, (_, i) => {
@@ -73,9 +76,29 @@ export default function MonthlyLedgerCalendar({
 
   const openDayDetails = (dateStr: string) => {
     setActiveDay(dateStr);
+    setDayError(null);
     const recs = monthCache[dateStr] || [];
     setActiveDayRecords(recs);
     setShowDayModal(true);
+  };
+
+  // Apply a quick edit only after the server confirms, and keep the month
+  // cache in sync so the edit does not "disappear" when reopening the day.
+  const applyQuickEdit = async (
+    record: DeliveryRecord,
+    updates: { deliveredQuantity?: number; status?: DeliveryStatus; reason?: string }
+  ) => {
+    setDayError(null);
+    try {
+      await onUpdateRecord(record.id, updates);
+      const next = activeDayRecords.map((x) =>
+        x.id === record.id ? { ...x, ...updates } : x
+      );
+      setActiveDayRecords(next);
+      setMonthCache((prev) => ({ ...prev, [activeDay]: next }));
+    } catch (err) {
+      setDayError(err instanceof Error ? err.message : 'Update failed. Please retry.');
+    }
   };
 
   const getDayStatusSummary = (dateStr: string) => {
@@ -285,6 +308,12 @@ export default function MonthlyLedgerCalendar({
                 ✕
               </button>
             </div>
+            {dayError && (
+              <div className="mx-6 mt-3 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800" role="alert">
+                <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                <p className="flex-1"><span className="font-bold">Not saved: </span>{dayError}</p>
+              </div>
+            )}
 
             <div className="p-6 max-h-[60vh] overflow-y-auto divide-y divide-slate-100">
               {activeDayRecords.length === 0 ? (
@@ -330,35 +359,26 @@ export default function MonthlyLedgerCalendar({
                       {/* Quick Edit button for this record */}
                       <div className="flex items-center gap-1">
                         <button
-                          onClick={async () => {
-                            await onUpdateRecord(r.id, {
+                          onClick={() =>
+                            applyQuickEdit(r, {
                               deliveredQuantity: r.scheduledQuantity,
                               status: 'DELIVERED',
                               reason: undefined,
-                            });
-                            // Refresh local
-                            r.deliveredQuantity = r.scheduledQuantity;
-                            r.status = 'DELIVERED';
-                            r.reason = undefined;
-                            setActiveDayRecords([...activeDayRecords]);
-                          }}
+                            })
+                          }
                           className="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 rounded-lg text-[10px] font-bold"
                           title="Set as Delivered"
                         >
                           ✓ Delivered
                         </button>
                         <button
-                          onClick={async () => {
-                            await onUpdateRecord(r.id, {
+                          onClick={() =>
+                            applyQuickEdit(r, {
                               deliveredQuantity: 0,
                               status: 'SKIPPED',
                               reason: 'Customer did not take milk',
-                            });
-                            r.deliveredQuantity = 0;
-                            r.status = 'SKIPPED';
-                            r.reason = 'Customer did not take milk';
-                            setActiveDayRecords([...activeDayRecords]);
-                          }}
+                            })
+                          }
                           className="px-2 py-1 bg-slate-100 hover:bg-rose-50 text-slate-700 hover:text-rose-800 rounded-lg text-[10px] font-bold"
                           title="Skip (0L)"
                         >

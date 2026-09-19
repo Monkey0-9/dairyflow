@@ -201,4 +201,43 @@ body {
   }
 }
 
+/* Sunlight High-Contrast Mode for Field Farmers */
+.sunlight-mode {
+  --background: #ffffff;
+  --foreground: #000000;
+  --card: #ffffff;
+  --card-foreground: #000000;
+  --border: #000000;
+  --primary: #047857;
+}
+.sunlight-mode body {
+  background-color: #ffffff !important;
+  color: #000000 !important;
+}
+.sunlight-mode .glass-panel {
+  background: #ffffff !important;
+  border: 2px solid #000000 !important;
+  box-shadow: none !important;
+}
+.sunlight-mode button,
+.sunlight-mode input,
+.sunlight-mode select {
+  border-width: 2px !important;
+  border-color: #000000 !important;
+  color: #000000 !important;
+  font-weight: 800 !important;
+}
+
+/* 44px Minimum Touch Target Rule for Mobile Field UX */
+.touch-target {
+  min-height: 44px;
+  min-width: 44px;
+}
+
+/* Accessible focus visible rings */
+*:focus-visible {
+  outline: 2px solid #059669;
+  outline-offset: 2px;
+}
+
 

@@ -33,72 +33,60 @@ export interface DbScope {
   farmerId: string;
 }
 
-let scopeCache: { scope: DbScope; at: number } | null = null;
-const SCOPE_TTL_MS = 60_000;
-
 export function clearScopeCache(): void {
-  scopeCache = null;
+  // No-op for backward compatibility
 }
 
 /**
- * Resolve the real tenant + farmer UUIDs that satisfy DB foreign keys.
- * Prefers the session values when they are UUIDs present in the database,
- * otherwise falls back to the first active tenant and its farmer profile.
- * Throws when no tenant/farmer exists so callers fail loudly (500)
- * instead of pretending an in-memory write was saved.
+ * Resolve the real tenant + farmer UUIDs that satisfy DB foreign keys for an authenticated session.
+ * Enforces multi-tenant isolation by checking session parameters against PostgreSQL.
+ * In unit test mode without live DB, returns fixture scope.
  */
 export async function resolveDbScope(session?: SessionUser | null): Promise<DbScope> {
-  if (scopeCache && Date.now() - scopeCache.at < SCOPE_TTL_MS) {
-    return scopeCache.scope;
+  if (isTestMode()) {
+    const tenantId = session?.tenantId || 'tenant_greenvalley';
+    const farmerId = session?.farmerId || 'farmer_01';
+    return { tenantId, farmerId };
   }
 
-  // 1. Session tenant, when it is a real DB row.
-  let tenantId: string | null = null;
-  if (isUuid(session?.tenantId)) {
-    try {
-      const t = await query(`SELECT id FROM tenants WHERE id = $1`, [session!.tenantId]);
-      if (t.rows.length > 0) tenantId = session!.tenantId;
-    } catch {
-      // fall through to default tenant lookup
-    }
+  if (!session || !session.tenantId) {
+    throw new Error('Unauthorized: Valid authenticated session context required.');
   }
 
-  // 2. Default: first active tenant.
-  if (!tenantId) {
-    const t = await query(
-      `SELECT id FROM tenants WHERE is_active = true ORDER BY created_at ASC LIMIT 1`
-    );
-    if (t.rows.length === 0) {
-      throw new Error('No active tenant found in database. Run database seed/migration first.');
-    }
-    tenantId = t.rows[0].id as string;
+  const tenantId = session.tenantId;
+
+  // 1. Verify tenant exists and is active
+  const t = await query(`SELECT id FROM tenants WHERE id = $1 AND is_active = true`, [tenantId]);
+  if (t.rows.length === 0) {
+    throw new Error(`Tenant '${tenantId}' does not exist or is inactive.`);
   }
 
-  // 3. Farmer: session farmer when real, else first farmer of the tenant.
-  let farmerId: string | null = null;
-  if (isUuid(session?.farmerId)) {
-    try {
-      const f = await query(
-        `SELECT id FROM farmer_profiles WHERE id = $1 AND tenant_id = $2`,
-        [session!.farmerId, tenantId]
-      );
-      if (f.rows.length > 0) farmerId = session!.farmerId;
-    } catch {
-      // fall through
-    }
-  }
-  if (!farmerId) {
+  // 2. Resolve farmer profile for tenant
+  let farmerId: string | null = session.farmerId || null;
+  if (farmerId) {
     const f = await query(
-      `SELECT id FROM farmer_profiles WHERE tenant_id = $1 ORDER BY created_at ASC LIMIT 1`,
+      `SELECT id FROM farmer_profiles WHERE id = $1 AND tenant_id = $2`,
+      [farmerId, tenantId]
+    );
+    if (f.rows.length > 0) farmerId = f.rows[0].id as string;
+    else farmerId = null;
+  }
+
+  if (!farmerId) {
+    // Lookup farmer associated with user or tenant
+    const f = await query(
+      `SELECT f.id FROM farmer_profiles f
+       WHERE f.tenant_id = $1
+       ORDER BY f.created_at ASC LIMIT 1`,
       [tenantId]
     );
-    if (f.rows.length === 0) {
-      throw new Error('No farmer profile found for tenant. Run database seed first.');
+    if (f.rows.length > 0) {
+      farmerId = f.rows[0].id as string;
+    } else {
+      throw new Error(`No farmer profile found for tenant '${tenantId}'.`);
     }
-    farmerId = f.rows[0].id as string;
   }
 
-  const scope = { tenantId, farmerId };
-  scopeCache = { scope, at: Date.now() };
-  return scope;
+  return { tenantId, farmerId };
 }
+

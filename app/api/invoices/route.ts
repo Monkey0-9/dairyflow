@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getStore } from '@/lib/store';
 import { decodeSession, SESSION_COOKIE_NAME } from '@/lib/auth';
 import { getInvoices, generateMonthlyInvoice } from '@/lib/services/billing.service';
+import { query } from '@/lib/db';
+import { isUuid, resolveDbScope } from '@/lib/db-scope';
 import { publishEvent } from '@/lib/events';
 
 const isUnitTest = () => process.env.TEST_ENV === 'unit' || process.env.VITEST === 'true';
@@ -103,42 +105,68 @@ export async function POST(req: NextRequest) {
     const year = body.year || 2026;
     const customerId = body.customerId;
 
-    // DB-first invoice generation (UNIQUE(customer_id, month, year) enforced)
+    // DB-first invoice generation (UNIQUE(customer_id, month, year) enforced).
+    // Production: customers resolve from PostgreSQL (the store is empty in
+    // production) and bulk generation really writes every customer invoice.
     if (!isUnitTest()) {
       try {
-        const store = getStore();
+        const scope = await resolveDbScope(session);
         if (customerId) {
-          const cust = store.customers.find((c) => c.id === customerId);
-          if (cust) {
-            const dbResult = await generateMonthlyInvoice({
+          const custRes = await query(
+            `SELECT id, farmer_id as "farmerId", tenant_id as "tenantId" FROM customer_profiles WHERE id = $1`,
+            [customerId]
+          );
+          if (custRes.rows.length === 0) {
+            return NextResponse.json({ success: false, error: 'Customer not found' }, { status: 404 });
+          }
+          const cust = custRes.rows[0] as { id: string; farmerId: string; tenantId: string };
+          const dbResult = await generateMonthlyInvoice({
+            customerId: cust.id,
+            farmerId: isUuid(body.farmerId) ? body.farmerId : cust.farmerId,
+            tenantId: cust.tenantId,
+            month,
+            year,
+          });
+          if (dbResult.success) {
+            publishEvent({
+              type: 'invoice:created',
+              tenantId: cust.tenantId,
               customerId,
-              farmerId: body.farmerId || cust.farmerId || store.farmer.id,
-              tenantId: session?.tenantId || cust.tenantId || store.tenantId,
+              payload: { invoiceId: dbResult.invoiceId, month, year },
+            });
+            return NextResponse.json({ success: true, invoiceId: dbResult.invoiceId, source: 'db' });
+          }
+          if (dbResult.error && dbResult.error.startsWith('Invoice already exists')) {
+            const existing = await getInvoices({ customerId, month, year });
+            return NextResponse.json({ success: true, invoiceId: existing[0]?.id, source: 'db', note: dbResult.error });
+          }
+          throw new Error(dbResult.error || 'Invoice generation failed');
+        } else {
+          // Bulk generation for every active customer of the dairy.
+          const custRes = await query(
+            `SELECT id, farmer_id as "farmerId", tenant_id as "tenantId"
+             FROM customer_profiles WHERE tenant_id = $1 AND is_active = true ORDER BY created_at ASC`,
+            [scope.tenantId]
+          );
+          const generated: string[] = [];
+          const skipped: { customerId: string; reason: string }[] = [];
+          for (const c of custRes.rows as { id: string; farmerId: string; tenantId: string }[]) {
+            const dbResult = await generateMonthlyInvoice({
+              customerId: c.id,
+              farmerId: c.farmerId,
+              tenantId: c.tenantId,
               month,
               year,
             });
-            if (dbResult.success) {
-              publishEvent({
-                type: 'invoice:created',
-                tenantId: session?.tenantId,
-                customerId,
-                payload: { invoiceId: dbResult.invoiceId, month, year },
-              });
-              return NextResponse.json({ success: true, invoiceId: dbResult.invoiceId, source: 'db' });
-            }
-            if (dbResult.error && !dbResult.error.startsWith('Invoice already exists')) {
-              throw new Error(dbResult.error);
-            }
+            if (dbResult.success && dbResult.invoiceId) generated.push(dbResult.invoiceId);
+            else skipped.push({ customerId: c.id, reason: dbResult.error || 'unknown' });
           }
-        } else {
-          // Bulk generation for all DB customers of farmer scope
-          const dbInvoices = await getInvoices({ month, year });
-          if (dbInvoices.length >= 0) {
-            // Fall through to store bulk to preserve seed behavior in demo; DB singles handled above
-          }
+          return NextResponse.json({ success: true, source: 'db', invoiceIds: generated, generatedCount: generated.length, skipped });
         }
       } catch (err) {
-        console.warn('[invoices] DB generate failed, falling back to store:', err);
+        console.error('[invoices] DB generate failed:', err);
+        const message = err instanceof Error ? err.message : 'Invoice generation failed';
+        return NextResponse.json({ success: false, error: message }, { status: 500 });
       }
     }
 

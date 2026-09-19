@@ -6,16 +6,12 @@ import { useRouter } from 'next/navigation';
 import {
   Calendar,
   Bell,
-  AlertTriangle,
   UserCheck,
   ChevronDown,
   Droplets,
   Truck,
   FileText,
   CreditCard,
-  Sparkles,
-  ShieldCheck,
-  Navigation,
   Clock,
   User,
   LogOut,
@@ -37,48 +33,51 @@ interface NavbarProps {
   pendingRequestsCount?: number;
 }
 
-export const personas = [
-  {
-    role: 'FARMER' as UserRole,
-    userId: 'user_farmer',
-    name: 'Suresh Patel (Farmer)',
-    subtitle: 'GreenValley Dairy Farm',
-    badge: 'Admin / Seller',
-    badgeColor: 'bg-emerald-100 text-emerald-800 border-emerald-200',
-  },
-  {
-    role: 'CUSTOMER' as UserRole,
-    userId: 'user_ravi',
-    name: 'Ravi Kumar',
-    subtitle: 'Cow Milk 1.0 L • Route #1',
-    badge: 'Customer',
-    badgeColor: 'bg-blue-100 text-blue-800 border-blue-200',
-  },
-  {
-    role: 'CUSTOMER' as UserRole,
-    userId: 'user_priya',
-    name: 'Priya Sharma',
-    subtitle: 'Buffalo Milk 1.5 L (Vacation Sep 20-25)',
-    badge: 'Customer (Vacation)',
-    badgeColor: 'bg-amber-100 text-amber-800 border-amber-200',
-  },
-  {
-    role: 'CUSTOMER' as UserRole,
-    userId: 'user_anand',
-    name: 'Anand Verma',
-    subtitle: 'A2 Milk 2.0 L (Open Dispute)',
-    badge: 'Customer (Dispute)',
-    badgeColor: 'bg-rose-100 text-rose-800 border-rose-200',
-  },
-  {
-    role: 'ADMIN' as UserRole,
-    userId: 'user_admin',
-    name: 'Platform SuperAdmin',
-    subtitle: 'Global System Oversight',
-    badge: 'System Admin',
-    badgeColor: 'bg-purple-100 text-purple-800 border-purple-200',
-  },
-];
+export const personas =
+  process.env.NODE_ENV === 'development'
+    ? [
+        {
+          role: 'FARMER' as UserRole,
+          userId: 'user_farmer',
+          name: 'Suresh Patel (Farmer)',
+          subtitle: 'GreenValley Dairy Farm',
+          badge: 'Admin / Seller',
+          badgeColor: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+        },
+        {
+          role: 'CUSTOMER' as UserRole,
+          userId: 'user_ravi',
+          name: 'Ravi Kumar',
+          subtitle: 'Cow Milk 1.0 L • Route #1',
+          badge: 'Client',
+          badgeColor: 'bg-blue-100 text-blue-800 border-blue-200',
+        },
+        {
+          role: 'CUSTOMER' as UserRole,
+          userId: 'user_priya',
+          name: 'Priya Sharma',
+          subtitle: 'Buffalo Milk 1.5 L (Vacation Sep 20-25)',
+          badge: 'Client (Vacation)',
+          badgeColor: 'bg-amber-100 text-amber-800 border-amber-200',
+        },
+        {
+          role: 'CUSTOMER' as UserRole,
+          userId: 'user_anand',
+          name: 'Anand Verma',
+          subtitle: 'A2 Milk 2.0 L (Open Dispute)',
+          badge: 'Client (Dispute)',
+          badgeColor: 'bg-rose-100 text-rose-800 border-rose-200',
+        },
+        {
+          role: 'ADMIN' as UserRole,
+          userId: 'user_admin',
+          name: 'Platform SuperAdmin',
+          subtitle: 'Global System Oversight',
+          badge: 'System Admin',
+          badgeColor: 'bg-purple-100 text-purple-800 border-purple-200',
+        },
+      ]
+    : [];
 
 export default function Navbar({
   currentRole,
@@ -98,7 +97,16 @@ export default function Navbar({
   const { t } = useT();
   const router = useRouter();
 
-  const activePersona = personas.find((p) => p.userId === currentUserId) || personas[0];
+  const isDemo = process.env.NEXT_PUBLIC_DEMO_MODE === 'true';
+  const matchedPersona = isDemo ? personas.find((p) => p.userId === currentUserId) : null;
+  const activePersona = matchedPersona || {
+    role: currentRole,
+    userId: currentUserId,
+    name: currentRole === 'CUSTOMER' ? 'Private Client' : currentRole === 'ADMIN' ? 'Dairy Administrator' : 'Farmer Account',
+    subtitle: currentRole === 'CUSTOMER' ? 'Private Reserve Allocation' : 'MilkFlow Production',
+    badge: currentRole === 'CUSTOMER' ? 'Client' : currentRole,
+    badgeColor: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+  };
   const unreadNotifs = notifications.filter((n) => !n.read);
 
   const todayStr = new Date().toISOString().split('T')[0];
@@ -355,19 +363,7 @@ export default function Navbar({
                 }`}
               >
                 <Truck className="w-3.5 h-3.5" />
-                <span>{t('tab.daily')}</span>
-              </button>
-
-              <button
-                onClick={() => onTabChange('calendar')}
-                className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition ${
-                  activeTab === 'calendar'
-                    ? 'bg-emerald-600 text-white font-semibold shadow-xs'
-                    : 'text-slate-600 hover:bg-white hover:text-slate-900'
-                }`}
-              >
-                <Calendar className="w-3.5 h-3.5" />
-                <span>{t('tab.calendar')}</span>
+                <span>Daily Run</span>
               </button>
 
               <button
@@ -379,7 +375,7 @@ export default function Navbar({
                 }`}
               >
                 <UserCheck className="w-3.5 h-3.5" />
-                <span>{t('tab.customers')}</span>
+                <span>Clients</span>
               </button>
 
               <button
@@ -391,24 +387,7 @@ export default function Navbar({
                 }`}
               >
                 <FileText className="w-3.5 h-3.5" />
-                <span>{t('tab.billing')}</span>
-              </button>
-
-              <button
-                onClick={() => onTabChange('disputes')}
-                className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition relative ${
-                  activeTab === 'disputes'
-                    ? 'bg-emerald-600 text-white font-semibold shadow-xs'
-                    : 'text-slate-600 hover:bg-white hover:text-slate-900'
-                }`}
-              >
-                <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
-                <span>{t('tab.disputes')}</span>
-                {disputeCount > 0 && (
-                  <span className="ml-1 px-1.5 py-0.2 bg-rose-500 text-white text-[10px] font-bold rounded-full">
-                    {disputeCount}
-                  </span>
-                )}
+                <span>Bills &amp; Invoices</span>
               </button>
 
               <button
@@ -420,7 +399,7 @@ export default function Navbar({
                 }`}
               >
                 <Clock className="w-3.5 h-3.5 text-amber-500" />
-                <span>{t('tab.requests')}</span>
+                <span>Requests</span>
                 {pendingRequestsCount !== undefined && pendingRequestsCount > 0 && (
                   <span className="ml-1 px-1.5 py-0.2 bg-amber-500 text-white text-[10px] font-bold rounded-full">
                     {pendingRequestsCount}
@@ -429,51 +408,20 @@ export default function Navbar({
               </button>
 
               <button
-                onClick={() => onTabChange('pricing')}
-                className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition ${
-                  activeTab === 'pricing'
+                onClick={() => onTabChange('more')}
+                className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition relative ${
+                  activeTab === 'more' || activeTab === 'pricing' || activeTab === 'forecast' || activeTab === 'audit' || activeTab === 'routes' || activeTab === 'calendar' || activeTab === 'disputes'
                     ? 'bg-emerald-600 text-white font-semibold shadow-xs'
                     : 'text-slate-600 hover:bg-white hover:text-slate-900'
                 }`}
               >
-                <Droplets className="w-3.5 h-3.5" />
-                <span>{t('tab.pricing')}</span>
-              </button>
-
-              <button
-                onClick={() => onTabChange('forecast')}
-                className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition ${
-                  activeTab === 'forecast'
-                    ? 'bg-emerald-600 text-white font-semibold shadow-xs'
-                    : 'text-slate-600 hover:bg-white hover:text-slate-900'
-                }`}
-              >
-                <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                <span>{t('tab.forecast')}</span>
-              </button>
-
-              <button
-                onClick={() => onTabChange('audit')}
-                className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition ${
-                  activeTab === 'audit'
-                    ? 'bg-emerald-600 text-white font-semibold shadow-xs'
-                    : 'text-slate-600 hover:bg-white hover:text-slate-900'
-                }`}
-              >
-                <ShieldCheck className="w-3.5 h-3.5" />
-                <span>{t('tab.audit')}</span>
-              </button>
-
-              <button
-                onClick={() => onTabChange('routes')}
-                className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition ${
-                  activeTab === 'routes'
-                    ? 'bg-emerald-600 text-white font-semibold shadow-xs'
-                    : 'text-slate-600 hover:bg-white hover:text-slate-900'
-                }`}
-              >
-                <Navigation className="w-3.5 h-3.5" />
-                <span>{t('tab.routes')}</span>
+                <ChevronDown className="w-3.5 h-3.5" />
+                <span>More Tools</span>
+                {disputeCount > 0 && (
+                  <span className="ml-1 px-1.5 py-0.2 bg-rose-500 text-white text-[10px] font-bold rounded-full">
+                    {disputeCount}
+                  </span>
+                )}
               </button>
             </div>
           ) : currentRole === 'CUSTOMER' ? (

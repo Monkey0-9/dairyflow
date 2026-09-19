@@ -1,4 +1,4 @@
-import { query } from '../db';
+import { query, transaction } from '../db';
 import { DeliveryStatus } from '../types';
 
 export interface LedgerQueryParams {
@@ -114,74 +114,70 @@ export async function updateDeliveryStatus(params: {
   bottlesReturned?: number;
 }): Promise<{ success: boolean; error?: string }> {
   try {
-    // Transactional isolation lock checking against day_closings (SELECT ... FOR UPDATE)
-    await query('BEGIN');
-
-    const lockCheck = await query(
-      `SELECT status FROM day_closings WHERE farmer_id = $1 AND date = $2 FOR UPDATE`,
-      [params.farmerId, params.date]
-    );
-
-    if (lockCheck.rows.length > 0 && lockCheck.rows[0].status === 'FINALIZED') {
-      await query('ROLLBACK');
-      return { success: false, error: 'Cannot modify delivery: Day has been finalized and locked.' };
-    }
-
-    // Check existing record for FSM validation
-    let currentRecord: { id: string; status: DeliveryStatus; scheduled_quantity: number } | null = null;
-    if (params.deliveryId) {
-      const res = await query(
-        `SELECT id, status, scheduled_quantity::float as scheduled_quantity FROM delivery_records WHERE id = $1 FOR UPDATE`,
-        [params.deliveryId]
+    return await transaction(async (client) => {
+      // Transactional isolation lock checking against day_closings (SELECT ... FOR UPDATE)
+      const lockCheck = await client.query(
+        `SELECT status FROM day_closings WHERE farmer_id = $1 AND date = $2 FOR UPDATE`,
+        [params.farmerId, params.date]
       );
-      if (res.rows.length > 0) currentRecord = res.rows[0] as unknown as { id: string; status: DeliveryStatus; scheduled_quantity: number };
-    } else {
-      const res = await query(
-        `SELECT id, status, scheduled_quantity::float as scheduled_quantity FROM delivery_records WHERE customer_id = $1 AND date = $2 FOR UPDATE`,
-        [params.customerId, params.date]
-      );
-      if (res.rows.length > 0) currentRecord = res.rows[0] as unknown as { id: string; status: DeliveryStatus; scheduled_quantity: number };
-    }
 
-    if (currentRecord && currentRecord.status !== params.status) {
-      const allowed = VALID_TRANSITIONS[currentRecord.status] || [];
-      if (!allowed.includes(params.status)) {
-        await query('ROLLBACK');
-        return {
-          success: false,
-          error: `Illegal state transition from ${currentRecord.status} to ${params.status}`,
-        };
+      if (lockCheck.rows.length > 0 && lockCheck.rows[0].status === 'FINALIZED') {
+        return { success: false, error: 'Cannot modify delivery: Day has been finalized and locked.' };
       }
-    }
 
-    // Quantity invariants: SKIPPED and NOT_DELIVERED must have 0.0 delivered quantity
-    let finalQty = params.deliveredQuantity;
-    if (params.status === 'SKIPPED' || params.status === 'NOT_DELIVERED') {
-      finalQty = 0.0;
-    }
+      // Check existing record for FSM validation
+      let currentRecord: { id: string; status: DeliveryStatus; scheduled_quantity: number } | null = null;
+      if (params.deliveryId) {
+        const res = await client.query(
+          `SELECT id, status, scheduled_quantity::float as scheduled_quantity FROM delivery_records WHERE id = $1 FOR UPDATE`,
+          [params.deliveryId]
+        );
+        if (res.rows.length > 0) currentRecord = res.rows[0] as unknown as { id: string; status: DeliveryStatus; scheduled_quantity: number };
+      } else {
+        const res = await client.query(
+          `SELECT id, status, scheduled_quantity::float as scheduled_quantity FROM delivery_records WHERE customer_id = $1 AND date = $2 FOR UPDATE`,
+          [params.customerId, params.date]
+        );
+        if (res.rows.length > 0) currentRecord = res.rows[0] as unknown as { id: string; status: DeliveryStatus; scheduled_quantity: number };
+      }
 
-    const bottles = typeof params.bottlesReturned === 'number' ? params.bottlesReturned : 0;
+      if (currentRecord && currentRecord.status !== params.status) {
+        const allowed = VALID_TRANSITIONS[currentRecord.status] || [];
+        if (!allowed.includes(params.status)) {
+          return {
+            success: false,
+            error: `Illegal state transition from ${currentRecord.status} to ${params.status}`,
+          };
+        }
+      }
 
-    if (params.deliveryId) {
-      await query(
-        `UPDATE delivery_records
-         SET status = $1, delivered_quantity = $2, notes = $3, bottles_returned = $4, delivered_at = NOW(), updated_at = NOW()
-         WHERE id = $5`,
-        [params.status, finalQty, params.notes || null, bottles, params.deliveryId]
-      );
-    } else {
-      await query(
-        `UPDATE delivery_records
-         SET status = $1, delivered_quantity = $2, notes = $3, bottles_returned = $4, delivered_at = NOW(), updated_at = NOW()
-         WHERE customer_id = $5 AND date = $6`,
-        [params.status, finalQty, params.notes || null, bottles, params.customerId, params.date]
-      );
-    }
+      // Quantity invariants: SKIPPED and NOT_DELIVERED must have 0.0 delivered quantity
+      let finalQty = params.deliveredQuantity;
+      if (params.status === 'SKIPPED' || params.status === 'NOT_DELIVERED') {
+        finalQty = 0.0;
+      }
 
-    await query('COMMIT');
-    return { success: true };
+      const bottles = typeof params.bottlesReturned === 'number' ? params.bottlesReturned : 0;
+
+      if (params.deliveryId) {
+        await client.query(
+          `UPDATE delivery_records
+           SET status = $1, delivered_quantity = $2, notes = $3, bottles_returned = $4, delivered_at = NOW(), updated_at = NOW()
+           WHERE id = $5`,
+          [params.status, finalQty, params.notes || null, bottles, params.deliveryId]
+        );
+      } else {
+        await client.query(
+          `UPDATE delivery_records
+           SET status = $1, delivered_quantity = $2, notes = $3, bottles_returned = $4, delivered_at = NOW(), updated_at = NOW()
+           WHERE customer_id = $5 AND date = $6`,
+          [params.status, finalQty, params.notes || null, bottles, params.customerId, params.date]
+        );
+      }
+
+      return { success: true };
+    });
   } catch (err: unknown) {
-    await query('ROLLBACK').catch(() => {});
     const message = err instanceof Error ? err.message : 'Failed to update delivery';
     console.error('[DeliveryService] updateDeliveryStatus error:', err);
     return { success: false, error: message };

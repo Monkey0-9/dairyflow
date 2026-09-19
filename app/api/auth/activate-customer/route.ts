@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { query } from '@/lib/db';
+import { query, transaction } from '@/lib/db';
 import { hashPassword, encodeSignedSession, SESSION_COOKIE_NAME, CLIENT_HINT_COOKIE_NAME, formatClientHint, SessionUser } from '@/lib/auth';
 import { hashInvitationToken } from '@/lib/security/invitation-crypto';
 import { checkRateLimit } from '@/lib/security/rate-limiter';
@@ -67,20 +67,20 @@ export async function POST(req: NextRequest) {
     const { hash, salt } = hashPassword(password);
 
     // Transactionally activate customer, set password, mark invitation as used
-    await query('BEGIN');
-    await query(
-      `UPDATE users SET password_hash = $1, password_salt = $2, is_active = true, updated_at = NOW() WHERE id = $3`,
-      [hash, salt, cust.userId]
-    );
-    await query(
-      `UPDATE customer_profiles SET is_active = true, updated_at = NOW() WHERE id = $1`,
-      [cust.customerId]
-    );
-    await query(
-      `UPDATE customer_invitations SET used_at = NOW() WHERE id = $1`,
-      [inv.id]
-    );
-    await query('COMMIT');
+    await transaction(async (client) => {
+      await client.query(
+        `UPDATE users SET password_hash = $1, password_salt = $2, is_active = true, updated_at = NOW() WHERE id = $3`,
+        [hash, salt, cust.userId]
+      );
+      await client.query(
+        `UPDATE customer_profiles SET is_active = true, updated_at = NOW() WHERE id = $1`,
+        [cust.customerId]
+      );
+      await client.query(
+        `UPDATE customer_invitations SET used_at = NOW() WHERE id = $1`,
+        [inv.id]
+      );
+    });
 
     const sessionUser: SessionUser = {
       userId: cust.userId,

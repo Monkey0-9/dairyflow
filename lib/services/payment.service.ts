@@ -7,8 +7,9 @@ export interface ProcessPaymentParams {
   farmerId: string;
   tenantId: string;
   amount: number;
-  method?: string;
-  transactionRef: string;
+  method?: string; // UPI, CASH, BANK_TRANSFER, CHEQUE
+  transactionRef?: string; // Optional reference number
+  notes?: string; // Additional notes
 }
 
 export interface PaymentResult {
@@ -48,30 +49,32 @@ export function verifyRazorpayPaymentSignature(params: {
 }
 
 /**
- * Idempotent payment processing.
- * Strictly guarantees that duplicate transaction references do not record double payments.
+ * Simple payment recording for farmers.
+ * Records manual payments via UPI, cash, bank transfer, etc.
+ * No complex gateway integrations needed.
  */
 export async function processPayment(params: ProcessPaymentParams): Promise<PaymentResult> {
   return transaction(async (client) => {
-    // 1. Check for existing payment with same transactionRef (Idempotency check)
-    const existing = await client.query(
-      `SELECT id, amount, invoice_id FROM payments WHERE transaction_ref = $1`,
-      [params.transactionRef]
-    );
-
-    if (existing.rows.length > 0) {
-      // Return cached/existing payment result idempotently
-      const invRes = await client.query(
-        `SELECT outstanding_amount::float as "outstandingAmount", status FROM invoices WHERE id = $1`,
-        [params.invoiceId]
+    // 1. Check for duplicate payment if transactionRef provided
+    if (params.transactionRef) {
+      const existing = await client.query(
+        `SELECT id, amount, invoice_id FROM payments WHERE transaction_ref = $1`,
+        [params.transactionRef]
       );
-      return {
-        success: true,
-        isDuplicate: true,
-        paymentId: existing.rows[0].id,
-        newOutstandingAmount: invRes.rows[0]?.outstandingAmount,
-        newStatus: invRes.rows[0]?.status,
-      };
+
+      if (existing.rows.length > 0) {
+        const invRes = await client.query(
+          `SELECT outstanding_amount::float as "outstandingAmount", status FROM invoices WHERE id = $1`,
+          [params.invoiceId]
+        );
+        return {
+          success: true,
+          isDuplicate: true,
+          paymentId: existing.rows[0].id,
+          newOutstandingAmount: invRes.rows[0]?.outstandingAmount,
+          newStatus: invRes.rows[0]?.status,
+        };
+      }
     }
 
     // 2. Fetch target invoice
@@ -90,13 +93,13 @@ export async function processPayment(params: ProcessPaymentParams): Promise<Paym
     const newOutstanding = Math.max(0, invoice.totalAmount - newPaidAmount);
     const newStatus = newOutstanding <= 0 ? 'PAID' : 'PARTIALLY_PAID';
 
-    const paymentId = `PAY_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const paymentId = crypto.randomUUID();
 
-    // 3. Insert payment
+    // 3. Insert payment record
     await client.query(
       `INSERT INTO payments (id, tenant_id, invoice_id, customer_id, farmer_id, amount, method, transaction_ref, status)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'SUCCESS')`,
-      [paymentId, params.tenantId, params.invoiceId, params.customerId, params.farmerId, params.amount, params.method || 'UPI', params.transactionRef]
+      [paymentId, params.tenantId, params.invoiceId, params.customerId, params.farmerId, params.amount, params.method || 'CASH', params.transactionRef || '']
     );
 
     // 4. Update invoice amounts

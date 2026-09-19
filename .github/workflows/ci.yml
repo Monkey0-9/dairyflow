@@ -1,21 +1,34 @@
-name: MilkFlow CI
+name: CI
 
 on:
   push:
-    branches: [main, master]
+    branches: [main, develop, master]
   pull_request:
     branches: [main, master]
 
 jobs:
-  build-test:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: npm
+          node-version: '20'
+          cache: 'npm'
       - run: npm ci
       - run: npm run lint
-      - run: npm test
       - run: npm run build
+      - run: npm run test
+      - run: npx prisma generate
+
+  prisma-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - run: npx prisma validate
+      - run: npx prisma generate

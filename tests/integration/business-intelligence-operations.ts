@@ -151,8 +151,8 @@ describe('Stages 13–20: Business Intelligence, Advanced Billing & Operational 
   // STAGE 18: Demand Planning Engine
   // =========================================================================
   describe('Stage 18: Demand Planning & Procurement Engine', () => {
-    it('computes daily procurement requirements based on forecast + safety buffer', () => {
-      const forecast = generateAIDemandForecast();
+    it('computes daily procurement requirements based on forecast + safety buffer', async () => {
+      const forecast = await generateAIDemandForecast();
       const plan = calculateDemandPlanning(forecast);
 
       expect(plan.targetDate).toBe(forecast.targetDate);

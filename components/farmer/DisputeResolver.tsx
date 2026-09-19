@@ -35,17 +35,20 @@ export default function DisputeResolver({
   const [customQty, setCustomQty] = useState('0');
   const [farmerNote, setFarmerNote] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  // Failed resolutions keep the claim open with the server message.
+  const [resolveError, setResolveError] = useState<string | null>(null);
 
   const openDisputes = disputes.filter((d) => d.status === 'OPEN');
   const resolvedDisputes = disputes.filter((d) => d.status !== 'OPEN');
 
   const handleQuickAccept = async (d: Dispute) => {
     setIsProcessing(true);
+    setResolveError(null);
     try {
       await onResolveDispute(d.id, 'ACCEPT', d.claimedQuantity, 'Claim accepted by farmer');
       onRefresh();
     } catch (err) {
-      console.error('Error accepting dispute', err);
+      setResolveError(err instanceof Error ? err.message : 'Failed to resolve dispute. Please retry.');
     } finally {
       setIsProcessing(false);
     }
@@ -53,11 +56,12 @@ export default function DisputeResolver({
 
   const handleQuickReject = async (d: Dispute) => {
     setIsProcessing(true);
+    setResolveError(null);
     try {
       await onResolveDispute(d.id, 'REJECT', d.recordedQuantity, 'Delivery re-verified at customer doorstep');
       onRefresh();
     } catch (err) {
-      console.error('Error rejecting dispute', err);
+      setResolveError(err instanceof Error ? err.message : 'Failed to resolve dispute. Please retry.');
     } finally {
       setIsProcessing(false);
     }
@@ -67,6 +71,7 @@ export default function DisputeResolver({
     e.preventDefault();
     if (!selectedDispute) return;
     setIsProcessing(true);
+    setResolveError(null);
     try {
       await onResolveDispute(
         selectedDispute.id,
@@ -74,10 +79,11 @@ export default function DisputeResolver({
         parseFloat(customQty),
         farmerNote || 'Custom settlement agreed with customer'
       );
+      // Parent throws on failure — reaching here means the settlement saved.
       setSelectedDispute(null);
       onRefresh();
     } catch (err) {
-      console.error('Error settling dispute', err);
+      setResolveError(err instanceof Error ? err.message : 'Failed to settle dispute. Please retry.');
     } finally {
       setIsProcessing(false);
     }
@@ -85,6 +91,11 @@ export default function DisputeResolver({
 
   return (
     <div className="space-y-6">
+      {resolveError && (
+        <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-800" role="alert">
+          <span className="font-bold">Dispute not resolved: </span>{resolveError}
+        </div>
+      )}
       {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-5 rounded-3xl border border-slate-200 shadow-xs">
         <div>

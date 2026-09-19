@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getStore } from '@/lib/store';
 import { decodeSession, SESSION_COOKIE_NAME } from '@/lib/auth';
 import { listDisputes, createDispute, resolveDispute } from '@/lib/services/dispute.service';
+import { query } from '@/lib/db';
+import { isUuid } from '@/lib/db-scope';
 import { publishEvent } from '@/lib/events';
 
 const isUnitTest = () => process.env.TEST_ENV === 'unit' || process.env.VITEST === 'true';
@@ -53,21 +55,28 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // DB-first direct INSERT INTO disputes
+    // DB-first direct INSERT INTO disputes.
+    // Production: the service resolves tenant/farmer from the customer row
+    // (the store is empty in production), and failures are reported loudly —
+    // a store-only "success" would vanish on restart.
     if (!isUnitTest()) {
       try {
-        const store = getStore();
-        const cust = store.customers.find((c) => c.id === targetCustomerId);
-        // Resolve date for DB row
+        // Resolve date for DB row (database first: store is empty in production)
         let disputeDate = date;
         if (!disputeDate) {
-          const rec = store.deliveryRecords.get(targetDeliveryId);
-          disputeDate = rec?.date || new Date().toISOString().slice(0, 10);
+          try {
+            const recRes = await query(`SELECT date FROM delivery_records WHERE id = $1`, [targetDeliveryId]);
+            disputeDate = recRes.rows[0]?.date || new Date().toISOString().slice(0, 10);
+          } catch {
+            const store = getStore();
+            const rec = store.deliveryRecords.get(targetDeliveryId);
+            disputeDate = rec?.date || new Date().toISOString().slice(0, 10);
+          }
         }
         const dbResult = await createDispute({
           customerId: targetCustomerId,
-          farmerId: cust?.farmerId,
-          tenantId: session?.tenantId || cust?.tenantId,
+          farmerId: undefined,
+          tenantId: isUuid(session?.tenantId) ? session?.tenantId : undefined,
           deliveryId: targetDeliveryId,
           date: disputeDate,
           issueType: issueType || reason || 'NOT_DELIVERED',
@@ -86,11 +95,14 @@ export async function POST(req: NextRequest) {
             { status: 201 }
           );
         }
-        if (dbResult.error && dbResult.error !== 'Customer not found' && dbResult.error !== 'Delivery record not found') {
-          throw new Error(dbResult.error);
+        if (dbResult.error === 'Customer not found' || dbResult.error === 'Delivery record not found') {
+          return NextResponse.json({ success: false, error: dbResult.error }, { status: 404 });
         }
+        throw new Error(dbResult.error || 'Failed to record dispute');
       } catch (err) {
-        console.warn('[disputes] DB insert failed, falling back to store:', err);
+        console.error('[disputes] DB insert failed:', err);
+        const message = err instanceof Error ? err.message : 'Failed to record dispute';
+        return NextResponse.json({ success: false, error: message }, { status: 500 });
       }
     }
 
@@ -152,12 +164,23 @@ export async function PATCH(req: NextRequest) {
           });
           return NextResponse.json({ success: true, disputeId, action: dbAction, source: 'db' });
         }
-        if (dbResult.error && dbResult.error !== 'Dispute not found') {
-          return NextResponse.json({ success: false, error: dbResult.error }, { status: 400 });
+        if (dbResult.error === 'Dispute not found') {
+          return NextResponse.json({ success: false, error: dbResult.error }, { status: 404 });
         }
+        return NextResponse.json({ success: false, error: dbResult.error || 'Failed to resolve dispute' }, { status: 400 });
       } catch (err) {
-        console.warn('[disputes] DB resolve failed, falling back to store:', err);
+        // Production: report loudly instead of a store-only false success.
+        console.error('[disputes] DB resolve failed:', err);
+        const message = err instanceof Error ? err.message : 'Failed to resolve dispute';
+        return NextResponse.json({ success: false, error: message }, { status: 500 });
       }
+    }
+
+    if (!isUnitTest() && !dbAction) {
+      return NextResponse.json(
+        { success: false, error: 'Invalid action. Use ACCEPT, REJECT, or ADJUST.' },
+        { status: 400 }
+      );
     }
 
     const store = getStore();

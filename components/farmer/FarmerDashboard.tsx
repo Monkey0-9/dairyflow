@@ -72,6 +72,9 @@ export default function FarmerDashboard({
   const [isUpdating, setIsUpdating] = useState(false);
   const [liveAttention, setLiveAttention] = useState(0);
   const [liveFlash, setLiveFlash] = useState(false);
+  // Failed saves surface here; modals stay open and badges stay stale-visible
+  // until the server actually confirms.
+  const [actionError, setActionError] = useState<string | null>(null);
   const { t } = useT();
 
   // Live updates: customer pauses / disputes / payments arrive via SSE
@@ -104,6 +107,7 @@ export default function FarmerDashboard({
     wasteOrSpillage: number;
     personalConsumption: number;
   }) => {
+    setActionError(null);
     try {
       const res = await fetch('/api/inventory', {
         method: 'POST',
@@ -113,12 +117,14 @@ export default function FarmerDashboard({
           ...formData,
         }),
       });
-      if (res.ok) {
-        setShowClosingModal(false);
-        onRefresh();
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || `Day closing failed (${res.status}). Nothing was locked.`);
       }
+      setShowClosingModal(false);
+      onRefresh();
     } catch (err) {
-      console.error('Failed to close day', err);
+      setActionError(err instanceof Error ? err.message : 'Failed to close day. Nothing was locked.');
     }
   };
 
@@ -143,23 +149,35 @@ export default function FarmerDashboard({
   // Fast 1-click delivery handler
   const handleQuickDeliver = async (record: DeliveryRecord) => {
     setIsUpdating(true);
-    await onUpdateRecord(record.id, {
-      deliveredQuantity: record.scheduledQuantity,
-      status: 'DELIVERED',
-      reason: undefined,
-    });
-    setIsUpdating(false);
+    setActionError(null);
+    try {
+      await onUpdateRecord(record.id, {
+        deliveredQuantity: record.scheduledQuantity,
+        status: 'DELIVERED',
+        reason: undefined,
+      });
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Delivery update failed. Please retry.');
+    } finally {
+      setIsUpdating(false);
+    }
   };
 
   // Fast 1-click skip handler
   const handleQuickSkip = async (record: DeliveryRecord) => {
     setIsUpdating(true);
-    await onUpdateRecord(record.id, {
-      deliveredQuantity: 0,
-      status: 'SKIPPED',
-      reason: 'Customer requested skip',
-    });
-    setIsUpdating(false);
+    setActionError(null);
+    try {
+      await onUpdateRecord(record.id, {
+        deliveredQuantity: 0,
+        status: 'SKIPPED',
+        reason: 'Customer requested skip',
+      });
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Skip update failed. Please retry.');
+    } finally {
+      setIsUpdating(false);
+    }
   };
 
   // Batch mark all pending as delivered
@@ -169,13 +187,22 @@ export default function FarmerDashboard({
     );
     if (pendingList.length === 0) return;
     setIsUpdating(true);
+    setActionError(null);
+    let failed = 0;
     for (const r of pendingList) {
-      await onUpdateRecord(r.id, {
-        deliveredQuantity: r.scheduledQuantity,
-        status: 'DELIVERED',
-      });
+      try {
+        await onUpdateRecord(r.id, {
+          deliveredQuantity: r.scheduledQuantity,
+          status: 'DELIVERED',
+        });
+      } catch {
+        failed += 1;
+      }
     }
     setIsUpdating(false);
+    if (failed > 0) {
+      setActionError(`${failed} of ${pendingList.length} deliveries failed to save. Please retry the remaining ones.`);
+    }
   };
 
   // Open Edit Modal
@@ -187,18 +214,24 @@ export default function FarmerDashboard({
     setCustomBottles(record.bottlesReturned || 1);
   };
 
-  // Save Edit Modal
+  // Save Edit Modal — closes only after the server confirms the save.
   const handleSaveEdit = async () => {
     if (!editingRecord) return;
     setIsUpdating(true);
-    await onUpdateRecord(editingRecord.id, {
-      deliveredQuantity: customStatus === 'SKIPPED' ? 0 : customQty,
-      status: customStatus,
-      reason: customReason,
-      bottlesReturned: customBottles,
-    });
-    setIsUpdating(false);
-    setEditingRecord(null);
+    setActionError(null);
+    try {
+      await onUpdateRecord(editingRecord.id, {
+        deliveredQuantity: customStatus === 'SKIPPED' ? 0 : customQty,
+        status: customStatus,
+        reason: customReason,
+        bottlesReturned: customBottles,
+      });
+      setEditingRecord(null);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Edit failed to save. Please retry.');
+    } finally {
+      setIsUpdating(false);
+    }
   };
 
   const handleQRScanned = (cust: CustomerProfile) => {
@@ -225,6 +258,15 @@ export default function FarmerDashboard({
 
   return (
     <div className="space-y-6 pb-16">
+      {actionError && (
+        <div className="flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800" role="alert">
+          <span className="font-bold">Change not saved.</span>
+          <p className="flex-1">{actionError}</p>
+          <button onClick={() => setActionError(null)} className="rounded-lg px-2 py-1 text-xs font-bold hover:bg-red-100" aria-label="Dismiss error">
+            Dismiss
+          </button>
+        </div>
+      )}
       {/* Top Header & Fast Actions */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white/95 backdrop-blur-md p-6 rounded-3xl border border-slate-200/80 shadow-xs hover-glow-emerald transition-all">
         <div>

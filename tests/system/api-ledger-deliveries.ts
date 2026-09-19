@@ -28,14 +28,14 @@ describe('System Testing: Ledger & Delivery API Endpoints', () => {
       expect(typeof data.stats.pendingLitres).toBe('number');
     });
 
-    it('should default to 2026-09-16 when date query parameter is omitted', async () => {
+    it('should default to current date when date query parameter is omitted', async () => {
       const req = new NextRequest('http://localhost:3000/api/ledger');
       const res = await getLedgerHandler(req);
       const data = await res.json();
 
       expect(res.status).toBe(200);
       expect(data.success).toBe(true);
-      expect(data.date).toBe('2026-09-16');
+      expect(data.date).toBe(new Date().toISOString().split('T')[0]);
     });
   });
 

@@ -78,7 +78,7 @@ function ActivateContent() {
         </div>
         <h1 className="text-2xl font-black tracking-tight text-slate-900">Activate Your Account</h1>
         <p className="text-xs text-slate-500 max-w-xs mx-auto">
-          Welcome to DairyFlow. Please set a secure password to activate your fresh dairy subscription.
+          Welcome to MilkFlow. Please set a secure password to activate your fresh dairy subscription.
         </p>
       </div>
 

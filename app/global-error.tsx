@@ -1,8 +1,5 @@
 'use client';
 
-import { useEffect } from 'react';
-import * as Sentry from '@sentry/nextjs';
-
 export default function GlobalError({
   error,
   reset,
@@ -10,10 +7,6 @@ export default function GlobalError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
-  useEffect(() => {
-    Sentry.captureException(error);
-  }, [error]);
-
   return (
     <html lang="en">
       <body>
@@ -34,8 +27,7 @@ export default function GlobalError({
         >
           <h1 style={{ fontSize: 20, fontWeight: 800 }}>Something went wrong</h1>
           <p style={{ fontSize: 13, color: '#64748b', maxWidth: 420 }}>
-            The dairy portal hit an unexpected error. Our team has been notified —
-            please try again in a moment.
+            The dairy portal hit an unexpected error. Please try again in a moment.
           </p>
           <button
             onClick={() => reset()}

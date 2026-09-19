@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getStore } from '@/lib/store';
 import { decodeSession, SESSION_COOKIE_NAME } from '@/lib/auth';
 import { getUnifiedRequests, handleRequestAction } from '@/lib/services/request.service';
+import { isUuid, resolveDbScope } from '@/lib/db-scope';
 
 const isUnitTest = () => process.env.TEST_ENV === 'unit' || process.env.VITEST === 'true';
 
@@ -18,22 +19,68 @@ export async function GET(req: NextRequest) {
 
     if (!isUnitTest()) {
       try {
-        const unified = await getUnifiedRequests({ farmerId });
-        if (unified.length > 0) {
-          const pauses = unified.filter((r) => r.type === 'PAUSE');
-          const extras = unified.filter((r) => r.type === 'EXTRA_MILK');
-          const qty = unified.filter((r) => r.type === 'QUANTITY_CHANGE');
-          return NextResponse.json({
-            success: true,
-            source: 'db',
-            vacationPauses: pauses,
-            extraMilkRequests: extras,
-            quantityChanges: qty,
-            requests: unified,
-          });
+        // Seed ids (farmer_01 / F001) never exist in PostgreSQL — resolve the
+        // real farmer so reviews list actual pending requests.
+        let dbFarmerId: string | undefined = isUuid(farmerId) ? farmerId : undefined;
+        if (!dbFarmerId) {
+          try {
+            dbFarmerId = (await resolveDbScope(session)).farmerId;
+          } catch {
+            dbFarmerId = undefined;
+          }
         }
+        const unified = await getUnifiedRequests({ farmerId: dbFarmerId });
+        const pauses = unified.filter((r) => r.type === 'PAUSE');
+        const extras = unified.filter((r) => r.type === 'EXTRA_MILK');
+        const qty = unified.filter((r) => r.type === 'QUANTITY_CHANGE');
+        // Map into the legacy store shapes the farmer UI consumes.
+        const pauseRequests = pauses.map((r) => ({
+          id: r.id,
+          customerId: r.customerId,
+          customerName: r.customerName,
+          customerCode: r.customerPhone || '',
+          customerPhone: r.customerPhone,
+          farmerId: r.farmerId,
+          startDate: r.startDate,
+          endDate: r.endDate,
+          reason: r.details,
+          status: r.status,
+          createdAt: r.createdAt,
+          reviewedAt: r.reviewedAt,
+        }));
+        const milkRequests = extras.map((r) => ({
+          id: r.id,
+          customerId: r.customerId,
+          customerName: r.customerName,
+          customerCode: r.customerPhone || '',
+          customerPhone: r.customerPhone,
+          farmerId: r.farmerId,
+          date: r.startDate,
+          requestedQuantity: r.quantity,
+          reason: r.details,
+          status: r.status,
+          createdAt: r.createdAt,
+          reviewedAt: r.reviewedAt,
+        }));
+        const pendingCount =
+          pauses.filter((r) => r.status === 'PENDING').length +
+          extras.filter((r) => r.status === 'PENDING').length +
+          qty.filter((r) => r.status === 'PENDING').length;
+        return NextResponse.json({
+          success: true,
+          source: 'db',
+          vacationPauses: pauses,
+          extraMilkRequests: extras,
+          quantityChanges: qty,
+          requests: unified,
+          pauseRequests,
+          milkRequests,
+          disputes: [],
+          pendingCount,
+        });
       } catch (err) {
-        console.warn('[farmer/requests] DB read failed, falling back to store:', err);
+        console.error('[farmer/requests] DB read failed:', err);
+        return NextResponse.json({ success: false, error: 'Failed to load requests from database' }, { status: 500 });
       }
     }
 
@@ -79,17 +126,21 @@ export async function PATCH(req: NextRequest) {
         const result = await handleRequestAction(requestId, serviceAction, {
           actorId: session?.userId || 'user_farmer',
           actorRole: session?.role || 'FARMER',
-          tenantId: session?.tenantId || 'tenant_greenvalley',
+          tenantId: isUuid(session?.tenantId) ? session.tenantId : '',
           notes: rejectionReason || note,
         });
         if (result.success) {
           return NextResponse.json({ success: true, requestId, action: serviceAction, source: 'db' });
         }
-        if (result.error && !result.error.startsWith('Request not found')) {
-          return NextResponse.json({ success: false, error: result.error }, { status: 400 });
+        if (result.error && result.error.startsWith('Request not found')) {
+          return NextResponse.json({ success: false, error: result.error }, { status: 404 });
         }
+        return NextResponse.json({ success: false, error: result.error || 'Failed to review request' }, { status: 400 });
       } catch (err) {
-        console.warn('[farmer/requests] DB review failed, falling back to store:', err);
+        // Production: report loudly instead of a store-only false success.
+        console.error('[farmer/requests] DB review failed:', err);
+        const message = err instanceof Error ? err.message : 'Failed to review request';
+        return NextResponse.json({ success: false, error: message }, { status: 500 });
       }
     }
 

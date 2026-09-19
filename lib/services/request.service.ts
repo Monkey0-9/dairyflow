@@ -1,4 +1,8 @@
 import { query, transaction } from '../db';
+import { isUuid } from '../db-scope';
+
+const hasRealScope = (tenantId?: string, farmerId?: string): boolean =>
+  isUuid(tenantId) && isUuid(farmerId);
 
 export interface UnifiedRequest {
   id: string;
@@ -205,18 +209,20 @@ export async function createPauseRequest(params: {
   endDate: string;
   reason?: string;
 }): Promise<{ success: boolean; id?: string; error?: string }> {
-  const scope = params.tenantId && params.farmerId
+  const scope = hasRealScope(params.tenantId, params.farmerId)
     ? { tenantId: params.tenantId, farmerId: params.farmerId }
     : await resolveCustomerScope(params.customerId);
   if (!scope) return { success: false, error: 'Customer not found' };
   try {
-    const id = `PR_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    await query(
+    // NOTE: PKs are uuid() — never insert prefixed seed ids (PR_*) here;
+    // Postgres rejects them and the request is silently lost.
+    const res = await query<{ id: string }>(
       `INSERT INTO pause_requests (id, tenant_id, customer_id, farmer_id, start_date, end_date, reason, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING')`,
-      [id, scope.tenantId, params.customerId, params.farmerId || scope.farmerId, params.startDate, params.endDate, params.reason || 'Vacation Pause requested by customer']
+       VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, 'PENDING')
+       RETURNING id`,
+      [scope.tenantId, params.customerId, params.farmerId || scope.farmerId, params.startDate, params.endDate, params.reason || 'Vacation Pause requested by customer']
     );
-    return { success: true, id };
+    return { success: true, id: res.rows[0].id };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Failed to create pause request';
     return { success: false, error: message };
@@ -236,18 +242,19 @@ export async function createExtraMilkRequest(params: {
   quantity: number;
   notes?: string;
 }): Promise<{ success: boolean; id?: string; error?: string }> {
-  const scope = params.tenantId && params.farmerId
+  const scope = hasRealScope(params.tenantId, params.farmerId)
     ? { tenantId: params.tenantId, farmerId: params.farmerId }
     : await resolveCustomerScope(params.customerId);
   if (!scope) return { success: false, error: 'Customer not found' };
   try {
-    const id = `EMR_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    await query(
+    // NOTE: PKs are uuid() — never insert prefixed seed ids (EMR_*) here.
+    const res = await query<{ id: string }>(
       `INSERT INTO extra_milk_requests (id, tenant_id, customer_id, farmer_id, date, milk_type, quantity, notes, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'PENDING')`,
-      [id, scope.tenantId, params.customerId, params.farmerId || scope.farmerId, params.date, params.milkType || 'Cow', params.quantity, params.notes || null]
+       VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, 'PENDING')
+       RETURNING id`,
+      [scope.tenantId, params.customerId, params.farmerId || scope.farmerId, params.date, params.milkType || 'Cow', params.quantity, params.notes || null]
     );
-    return { success: true, id };
+    return { success: true, id: res.rows[0].id };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Failed to create extra milk request';
     return { success: false, error: message };
@@ -267,18 +274,19 @@ export async function createQuantityChangeRequest(params: {
   newQuantity: number;
   reason?: string;
 }): Promise<{ success: boolean; id?: string; error?: string }> {
-  const scope = params.tenantId && params.farmerId
+  const scope = hasRealScope(params.tenantId, params.farmerId)
     ? { tenantId: params.tenantId, farmerId: params.farmerId }
     : await resolveCustomerScope(params.customerId);
   if (!scope) return { success: false, error: 'Customer not found' };
   try {
-    const id = `QCR_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    await query(
+    // NOTE: PKs are uuid() — never insert prefixed seed ids (QCR_*) here.
+    const res = await query<{ id: string }>(
       `INSERT INTO quantity_change_requests (id, tenant_id, customer_id, farmer_id, effective_date, new_quantity, reason, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING')`,
-      [id, scope.tenantId, params.customerId, params.farmerId || scope.farmerId, params.effectiveDate, params.newQuantity, params.reason || null]
+       VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, 'PENDING')
+       RETURNING id`,
+      [scope.tenantId, params.customerId, params.farmerId || scope.farmerId, params.effectiveDate, params.newQuantity, params.reason || null]
     );
-    return { success: true, id };
+    return { success: true, id: res.rows[0].id };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Failed to create quantity change request';
     return { success: false, error: message };
@@ -324,10 +332,9 @@ export async function handleRequestAction(
       if (custUserRes.rows[0]) {
         await client.query(
           `INSERT INTO notifications (id, tenant_id, user_id, title, message, type)
-           VALUES ($1, $2, $3, $4, $5, $6)`,
+           VALUES (gen_random_uuid(), $1, $2, $3, $4, $5)`,
           [
-            `NOTIF_${Date.now()}`,
-            reviewer.tenantId,
+            req.tenant_id,
             custUserRes.rows[0].user_id,
             `Vacation Request ${newStatus}`,
             `Your pause request for ${req.start_date} to ${req.end_date} has been ${newStatus.toLowerCase()}.`,
@@ -366,10 +373,9 @@ export async function handleRequestAction(
       if (custUserRes.rows[0]) {
         await client.query(
           `INSERT INTO notifications (id, tenant_id, user_id, title, message, type)
-           VALUES ($1, $2, $3, $4, $5, $6)`,
+           VALUES (gen_random_uuid(), $1, $2, $3, $4, $5)`,
           [
-            `NOTIF_${Date.now()}`,
-            reviewer.tenantId,
+            req.tenant_id,
             custUserRes.rows[0].user_id,
             `Extra Milk Request ${newStatus}`,
             `Your extra milk request for ${req.quantity}L on ${req.date} has been ${newStatus.toLowerCase()}.`,

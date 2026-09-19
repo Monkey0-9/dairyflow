@@ -16,6 +16,7 @@ import {
   ChevronUp,
   Cpu,
   Lock,
+  Download,
 } from 'lucide-react';
 import { CryptographicAuditBlock } from '@/lib/types';
 
@@ -73,6 +74,26 @@ export default function AuditTrailViewer() {
     } finally {
       setVerifying(false);
     }
+  };
+
+  const handleDownloadCertificate = () => {
+    if (!verificationResult) return;
+    const cert = {
+      title: 'MilkFlow Cryptographic Audit Certificate',
+      status: verificationResult.valid ? 'VERIFIED' : 'FAILED',
+      algorithm: verificationResult.algorithm,
+      totalBlocks: verificationResult.totalBlocks,
+      headHash: verificationResult.headBlock?.hash || verificationResult.latestHash,
+      verifiedAt: verificationResult.verifiedAt,
+      issuedBy: 'MilkFlow Private Reserve Cryptographic Engine',
+    };
+    const blob = new Blob([JSON.stringify(cert, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `audit-certificate-${new Date().toISOString().split('T')[0]}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   const copyToClipboard = (text: string) => {
@@ -184,6 +205,17 @@ export default function AuditTrailViewer() {
                       Head Hash: <strong className="underline">{verificationResult.headBlock.hash.substring(0, 16)}...</strong>
                     </span>
                   )}
+                </div>
+
+                <div className="pt-3 flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleDownloadCertificate}
+                    className="px-3.5 py-1.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs transition cursor-pointer"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Download Cryptographic Certificate</span>
+                  </button>
                 </div>
               </div>
             </div>

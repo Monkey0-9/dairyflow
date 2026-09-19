@@ -40,8 +40,13 @@ async function syncDbCustomersIntoStore() {
        FROM customer_profiles c
        JOIN users u ON c.user_id = u.id
        LEFT JOIN subscriptions s ON s.customer_id = c.id
+       WHERE c.is_active = true AND u.is_active = true
        ORDER BY c.created_at ASC`
     );
+
+    // Prune closed / deleted customers from in-memory cache
+    const activeDbIds = new Set(res.rows.map((r) => r.customerId));
+    store.customers = store.customers.filter((c) => activeDbIds.has(c.id));
 
     for (const row of res.rows) {
       const isApproved = row.customerActive && row.userActive;
@@ -710,7 +715,7 @@ async function patchCustomerDurable(body: any) {
     );
     if (status !== undefined) {
       const isActive = status === 'ACTIVE';
-      await query(`UPDATE customer_profiles SET is_active = $1, status = $2, updated_at = NOW() WHERE id = $3`, [isActive, status, customerId]);
+      await query(`UPDATE customer_profiles SET is_active = $1, updated_at = NOW() WHERE id = $2`, [isActive, customerId]);
       await query(`UPDATE users SET is_active = $1, updated_at = NOW() WHERE id = $2`, [isActive, dbCust.user_id]);
       await query(`UPDATE subscriptions SET status = $1, updated_at = NOW() WHERE customer_id = $2`, [isActive ? 'ACTIVE' : 'PAUSED', customerId]);
     }
@@ -757,7 +762,7 @@ async function deleteCustomerDurable(customerId: string) {
     // Soft-close: preserves delivery/invoice/payment/audit history and
     // cannot violate foreign keys. The client leaves the active roster.
     const res = await query(
-      `UPDATE customer_profiles SET is_active = false, status = 'CLOSED', updated_at = NOW() WHERE id = $1 RETURNING user_id`,
+      `UPDATE customer_profiles SET is_active = false, updated_at = NOW() WHERE id = $1 RETURNING user_id`,
       [customerId]
     );
     if (res.rows.length === 0) {
@@ -765,6 +770,7 @@ async function deleteCustomerDurable(customerId: string) {
     }
     await query(`UPDATE users SET is_active = false, updated_at = NOW() WHERE id = $1`, [res.rows[0].user_id]);
     await query(`UPDATE subscriptions SET status = 'CANCELLED', updated_at = NOW() WHERE customer_id = $1`, [customerId]);
+    await query(`DELETE FROM delivery_records WHERE customer_id = $1 AND (status = 'PENDING' OR delivered_quantity = 0)`, [customerId]);
 
     try {
       const store = getStore();

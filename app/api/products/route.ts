@@ -93,15 +93,15 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const productId = `prod_${code.toLowerCase()}_${Date.now()}`;
-
+    // NOTE: products.id is uuid() — a prefixed seed id would be rejected by
+    // Postgres and the product would never save.
     const res = await query<ProductCostItem>(
       `INSERT INTO products (id, tenant_id, name, code, unit, price_per_unit, description, is_active, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, true, NOW(), NOW())
+       VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, true, NOW(), NOW())
        RETURNING id, tenant_id as "tenantId", name, code, unit,
                  price_per_unit::float as "pricePerUnit", description,
                  is_active as "isActive", created_at as "createdAt", updated_at as "updatedAt"`,
-      [productId, auth.user.tenantId, name, code.toUpperCase(), unit, cleanPrice, description || null]
+      [auth.user.tenantId, name, code.toUpperCase(), unit, cleanPrice, description || null]
     );
 
     const product = res.rows[0];

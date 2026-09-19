@@ -98,8 +98,19 @@ describe('Enterprise Domain Matrix: Complete Operations Test Suite', () => {
       [targetFarmerId]
     );
 
-    const custRes = await query<{ id: string }>('SELECT id FROM customer_profiles LIMIT 1');
-    const custId = custRes.rows[0]?.id || 'cust_ravi';
+    const custRes = await query<{ id: string }>(
+      "SELECT id FROM customer_profiles WHERE tenant_id = 'tenant_greenvalley' LIMIT 1"
+    );
+    let custId = custRes.rows[0]?.id;
+    if (!custId) {
+      custId = 'cust_test_transfer';
+      await query(
+        `INSERT INTO customer_profiles (id, user_id, farmer_id, tenant_id, name, phone, address, status, delivery_order, created_at, updated_at)
+         VALUES ($1, 'u_target_farmer', 'F001', 'tenant_greenvalley', 'Test Cust', '+91 91234 56789', 'Main St', 'ACTIVE', 1, NOW(), NOW())
+         ON CONFLICT (id) DO UPDATE SET tenant_id = 'tenant_greenvalley'`,
+        [custId]
+      );
+    }
 
     // 1. Initiate Transfer
     const initReq = new NextRequest('http://localhost:3000/api/customer/transfer', {

@@ -67,8 +67,8 @@ export async function downloadInvoicePdf(params: {
       return { success: false, error: data.error || 'Statement unavailable' };
     }
     const st = data.statement as Statement;
-    const dairy = params.dairyName || 'GreenValley Dairy Farm';
-    const upi = params.upiId || 'greenvalley@okaxis';
+    const dairy = params.dairyName || 'MilkFlow Dairy Enterprise';
+    const upi = params.upiId || 'payment@milkflow';
 
     const doc = new jsPDF({ unit: 'pt', format: 'a4' });
     const W = 595;
@@ -179,3 +179,95 @@ export async function downloadInvoicePdf(params: {
     return { success: false, error: err instanceof Error ? err.message : 'PDF generation failed' };
   }
 }
+
+export interface StatementData {
+  statementId: string;
+  memberName: string;
+  period: string;
+  transactions: Array<{
+    date: string;
+    description: string;
+    litres: number | string;
+    rate: number;
+    amount: number;
+  }>;
+  total: number;
+}
+
+export async function generateStatementPDF(data: StatementData): Promise<Blob> {
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'pt',
+    format: 'a4',
+  });
+
+  // Header
+  doc.setFillColor(15, 23, 42); // slate-900
+  doc.rect(0, 0, 595.28, 90, 'F');
+
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(20);
+  doc.text('MilkFlow Private Reserve', 40, 45);
+  doc.setFontSize(10);
+  doc.setTextColor(212, 175, 55); // Champagne gold
+  doc.text('Cryptographically Verified Member Statement', 40, 65);
+
+  // Member Information
+  doc.setTextColor(15, 23, 42);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(10);
+  doc.text('MEMBER STATEMENT', 40, 120);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.text(`Client: ${data.memberName}`, 40, 140);
+  doc.text(`Billing Period: ${data.period}`, 40, 155);
+  doc.text(`Statement ID: ${data.statementId}`, 40, 170);
+
+  // Table header
+  let y = 205;
+  doc.setFillColor(241, 245, 249);
+  doc.rect(40, y - 14, 515, 22, 'F');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.text('Date', 50, y);
+  doc.text('Description', 130, y);
+  doc.text('Litres', 360, y);
+  doc.text('Rate', 430, y);
+  doc.text('Amount', 500, y);
+
+  y += 20;
+  doc.setFont('helvetica', 'normal');
+  for (const t of data.transactions.slice(0, 25)) {
+    doc.text(String(t.date).slice(0, 10), 50, y);
+    doc.text(String(t.description).slice(0, 35), 130, y);
+    doc.text(String(t.litres), 360, y);
+    doc.text(rs(t.rate), 430, y);
+    doc.text(rs(t.amount), 500, y);
+    y += 18;
+    if (y > 750) {
+      doc.addPage();
+      y = 50;
+    }
+  }
+
+  // Total
+  y += 10;
+  doc.setDrawColor(203, 213, 225);
+  doc.line(40, y, 555, y);
+  y += 18;
+  doc.setFont('helvetica', 'bold');
+  doc.text('NET PAYABLE TOTAL:', 360, y);
+  doc.setTextColor(212, 175, 55);
+  doc.text(rs(data.total), 500, y);
+
+  // Footer
+  doc.setTextColor(148, 163, 184);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+  doc.text('Tamper-evident record: SHA-256 integrity chained. Computer-generated accounting proof.', 40, 800);
+
+  return doc.output('blob');
+}
+

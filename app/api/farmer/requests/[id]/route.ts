@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getStore } from '@/lib/store';
 import { decodeSession, SESSION_COOKIE_NAME } from '@/lib/auth';
 import { handleRequestAction } from '@/lib/services/request.service';
+import { isUuid } from '@/lib/db-scope';
 import { publishEvent } from '@/lib/events';
 
 const isUnitTest = () => process.env.TEST_ENV === 'unit' || process.env.VITEST === 'true';
@@ -41,13 +42,15 @@ export async function PATCH(
       );
     }
 
-    // DB-first: transactional reviewRequest inside BEGIN...COMMIT
+    // DB-first: transactional review inside a real transaction.
+    // Production: failures are reported loudly instead of a store-only
+    // false success (the store is empty in production).
     if (!isUnitTest()) {
       try {
         const result = await handleRequestAction(requestId, serviceAction, {
           actorId: session?.userId || 'user_farmer',
           actorRole: session?.role || 'FARMER',
-          tenantId: session?.tenantId || 'tenant_greenvalley',
+          tenantId: isUuid(session?.tenantId) ? session.tenantId : '',
           notes: rejectionReason || note,
         });
         if (result.success) {
@@ -58,12 +61,14 @@ export async function PATCH(
           });
           return NextResponse.json({ success: true, requestId, action: serviceAction, source: 'db' });
         }
-        // "Request not found" in DB -> fall through to store (seed ids like req_pause_*)
-        if (result.error && !result.error.startsWith('Request not found')) {
-          return NextResponse.json({ success: false, error: result.error }, { status: 400 });
+        if (result.error && result.error.startsWith('Request not found')) {
+          return NextResponse.json({ success: false, error: result.error }, { status: 404 });
         }
+        return NextResponse.json({ success: false, error: result.error || 'Failed to review request' }, { status: 400 });
       } catch (err) {
-        console.warn('[farmer/requests/[id]] DB review failed, falling back to store:', err);
+        console.error('[farmer/requests/[id]] DB review failed:', err);
+        const message = err instanceof Error ? err.message : 'Failed to review request';
+        return NextResponse.json({ success: false, error: message }, { status: 500 });
       }
     }
 

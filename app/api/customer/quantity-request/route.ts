@@ -38,7 +38,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // DB-first path
+    // DB-first path. Production: the database is the source of truth — a
+    // fallback object that is never persisted would be a false success.
+    let dbWriteFailed: unknown = null;
     if (!isUnitTest()) {
       try {
         const store = getStore();
@@ -89,7 +91,8 @@ export async function POST(req: NextRequest) {
           }
         }
       } catch (err) {
-        console.warn('[quantity-request] DB insert failed, falling back to store:', err);
+        dbWriteFailed = err;
+        console.error('[quantity-request] DB insert failed:', err);
       }
     }
 
@@ -102,6 +105,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         { success: false, error: 'Customer not found or unauthorized' },
         { status: 401 }
+      );
+    }
+
+    // Production: the DB write above failed, so there is nothing durable to
+    // return. Report honestly instead of a fake 201 that is lost immediately.
+    if (!isUnitTest() && dbWriteFailed) {
+      const message = dbWriteFailed instanceof Error ? dbWriteFailed.message : 'Request could not be saved. Please retry.';
+      return NextResponse.json(
+        { success: false, error: `Request could not be saved: ${message}` },
+        { status: 503 }
       );
     }
 

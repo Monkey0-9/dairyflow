@@ -34,6 +34,8 @@ export default function ProductPricing({ products, onUpdateProductPrice, onRefre
   const [newPrice, setNewPrice] = useState('60');
   const [isNewPriceNull, setIsNewPriceNull] = useState(false);
   const [newDescription, setNewDescription] = useState('');
+  // Failed saves keep the editor open with the server message.
+  const [priceError, setPriceError] = useState<string | null>(null);
 
   const handleStartEdit = (p: Product) => {
     setEditingId(p.id);
@@ -48,6 +50,7 @@ export default function ProductPricing({ products, onUpdateProductPrice, onRefre
 
   const handleSavePrice = async (id: string) => {
     setIsSaving(true);
+    setPriceError(null);
     try {
       const finalPrice: number | null = isEditNull ? null : parseFloat(editPrice);
 
@@ -61,21 +64,22 @@ export default function ProductPricing({ products, onUpdateProductPrice, onRefre
         }),
       });
 
-      const data = await res.json();
-      if (data.success) {
-        setProductList((prev) =>
-          prev.map((item) => (item.id === id ? { ...item, basePrice: finalPrice } : item))
-        );
-        if (onUpdateProductPrice) {
-          onUpdateProductPrice(id, finalPrice);
-        }
-        if (onRefresh) onRefresh();
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || `Price update failed (${res.status}).`);
       }
+      setProductList((prev) =>
+        prev.map((item) => (item.id === id ? { ...item, basePrice: finalPrice } : item))
+      );
+      if (onUpdateProductPrice) {
+        onUpdateProductPrice(id, finalPrice);
+      }
+      if (onRefresh) onRefresh();
+      setEditingId(null);
     } catch (err) {
-      console.error('Failed to update product cost:', err);
+      setPriceError(err instanceof Error ? err.message : 'Failed to update price. Please retry.');
     } finally {
       setIsSaving(false);
-      setEditingId(null);
     }
   };
 
@@ -83,6 +87,7 @@ export default function ProductPricing({ products, onUpdateProductPrice, onRefre
     e.preventDefault();
     if (!newName) return;
     setIsSaving(true);
+    setPriceError(null);
     try {
       const finalPrice = isNewPriceNull ? null : parseFloat(newPrice);
       const res = await fetch('/api/products', {
@@ -97,30 +102,32 @@ export default function ProductPricing({ products, onUpdateProductPrice, onRefre
           description: newDescription,
         }),
       });
-      const data = await res.json();
-      if (data.success) {
-        const created: Product = {
-          id: data.product?.id || `prod_${Date.now()}`,
-          tenantId: data.product?.tenantId || 'tenant_greenvalley',
-          farmerId: 'farmer_01',
-          name: newName,
-          category: newCategory,
-          unit: newUnit,
-          basePrice: finalPrice,
-          description: newDescription,
-          inStock: true,
-        };
-        setProductList((prev) => [...prev, created]);
-        setShowAddModal(false);
-        // Reset form
-        setNewName('');
-        setNewDescription('');
-        setNewPrice('60');
-        setIsNewPriceNull(false);
-        if (onRefresh) onRefresh();
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success || !data?.product?.id) {
+        throw new Error(data?.error || `Product creation failed (${res.status}).`);
       }
+      // Use the server-returned row as the single source of truth.
+      const created: Product = {
+        id: data.product.id,
+        tenantId: data.product.tenantId,
+        farmerId: productList[0]?.farmerId || products[0]?.farmerId || '',
+        name: data.product.name,
+        category: newCategory,
+        unit: data.product.unit || newUnit,
+        basePrice: data.product.pricePerUnit ?? finalPrice,
+        description: data.product.description ?? newDescription,
+        inStock: true,
+      };
+      setProductList((prev) => [...prev, created]);
+      setShowAddModal(false);
+      // Reset form
+      setNewName('');
+      setNewDescription('');
+      setNewPrice('60');
+      setIsNewPriceNull(false);
+      if (onRefresh) onRefresh();
     } catch (err) {
-      console.error('Failed to create product:', err);
+      setPriceError(err instanceof Error ? err.message : 'Failed to create product. Please retry.');
     } finally {
       setIsSaving(false);
     }
@@ -143,6 +150,11 @@ export default function ProductPricing({ products, onUpdateProductPrice, onRefre
 
   return (
     <div className="space-y-6">
+      {priceError && (
+        <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-800" role="alert">
+          <span className="font-bold">Not saved: </span>{priceError}
+        </div>
+      )}
       {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-5 rounded-3xl border border-slate-200 shadow-xs">
         <div>

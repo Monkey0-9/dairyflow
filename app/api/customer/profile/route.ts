@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticateRequest } from '@/lib/api-auth';
-import { query } from '@/lib/db';
+import { query, transaction } from '@/lib/db';
 import { getStore } from '@/lib/store';
 
 export async function GET(req: NextRequest) {
@@ -65,39 +65,42 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'At least one editable field must be provided.' }, { status: 400 });
     }
 
-    // Update in-memory demo store & DB
-    const store = getStore();
-    const storeCust = store.customers.find((c) => c.id === custId);
-    if (storeCust) {
-      if (name) storeCust.name = name.trim();
-      if (phone) storeCust.phone = phone.trim();
-      if (deliveryAddress) storeCust.address = deliveryAddress.trim();
-    }
+    // Database update FIRST inside a real transaction (single connection),
+    // then mirror into the cache. Mutating the cache before the DB confirms
+    // is what made edits "disappear" after refresh.
+    await transaction(async (client) => {
+      if (deliveryAddress) {
+        await client.query(`UPDATE customer_profiles SET delivery_address = $1, updated_at = NOW() WHERE id = $2`, [deliveryAddress.trim(), custId]);
+      }
+      if (name || phone || email) {
+        const updates: string[] = [];
+        const params: unknown[] = [];
+        let idx = 1;
+        if (name) { updates.push(`name = $${idx++}`); params.push(name.trim()); }
+        if (phone) { updates.push(`phone = $${idx++}`); params.push(phone.trim()); }
+        if (email) { updates.push(`email = $${idx++}`); params.push(email.trim()); }
+        params.push(auth.user.userId);
 
-    // Database update
-    await query('BEGIN');
-    if (deliveryAddress) {
-      await query(`UPDATE customer_profiles SET delivery_address = $1, updated_at = NOW() WHERE id = $2`, [deliveryAddress.trim(), custId]);
-    }
-    if (name || phone || email) {
-      const updates: string[] = [];
-      const params: unknown[] = [];
-      let idx = 1;
-      if (name) { updates.push(`name = $${idx++}`); params.push(name.trim()); }
-      if (phone) { updates.push(`phone = $${idx++}`); params.push(phone.trim()); }
-      if (email) { updates.push(`email = $${idx++}`); params.push(email.trim()); }
-      params.push(auth.user.userId);
+        await client.query(`UPDATE users SET ${updates.join(', ')}, updated_at = NOW() WHERE id = $${idx}`, params);
+      }
+    });
 
-      await query(`UPDATE users SET ${updates.join(', ')}, updated_at = NOW() WHERE id = $${idx}`, params);
-    }
-    await query('COMMIT');
+    // Mirror into the in-memory cache only after the database confirms.
+    try {
+      const store = getStore();
+      const storeCust = store.customers.find((c) => c.id === custId);
+      if (storeCust) {
+        if (name) storeCust.name = name.trim();
+        if (phone) storeCust.phone = phone.trim();
+        if (deliveryAddress) storeCust.address = deliveryAddress.trim();
+      }
+    } catch { /* cache mirror best-effort */ }
 
     return NextResponse.json({
       success: true,
       message: 'Profile updated successfully!',
     });
   } catch (error: unknown) {
-    await query('ROLLBACK').catch(() => {});
     const message = error instanceof Error ? error.message : 'Failed to update profile';
     return NextResponse.json({ success: false, error: message }, { status: 500 });
   }

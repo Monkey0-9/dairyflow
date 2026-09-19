@@ -46,6 +46,8 @@ export async function GET(req: NextRequest) {
 
     const row = res.rows[0];
 
+    const ip = req.headers.get('x-forwarded-for')?.split(',')[0] || req.headers.get('x-real-ip') || 'Web Client';
+
     return NextResponse.json({
       success: true,
       profile: {
@@ -56,17 +58,17 @@ export async function GET(req: NextRequest) {
         email: row.email,
         phone: row.phone,
         role: row.role,
-        businessName: row.businessName || row.tenantName || 'Dairy Enterprise',
-        upiId: row.upiId || 'dairy@okaxis',
-        address: row.address || 'Dairy Headquarters',
-        routeCode: row.routeCode || 'ROUTE-1',
+        businessName: row.businessName || row.tenantName || '',
+        upiId: row.upiId || '',
+        address: row.address || '',
+        routeCode: row.routeCode || '',
         currency: 'INR (₹)',
         timezone: 'Asia/Kolkata (IST +05:30)',
         activeSessions: [
           {
             id: 'sess_current',
-            device: 'Current Web Session',
-            ip: '127.0.0.1',
+            device: 'Authenticated Web Session',
+            ip,
             lastActive: 'Just now',
             isCurrent: true,
           },
@@ -134,12 +136,12 @@ export async function PUT(req: NextRequest) {
           ]
         );
       } else {
-        const newFarmerId = `farmer_${Date.now()}`;
+        // NOTE: farmer_profiles.id is uuid() — a prefixed seed id would be
+        // rejected by Postgres and the profile would never save.
         await client.query(
           `INSERT INTO farmer_profiles (id, user_id, tenant_id, business_name, upi_id, address)
-           VALUES ($1, $2, $3, $4, $5, $6)`,
+           VALUES (gen_random_uuid(), $1, $2, $3, $4, $5)`,
           [
-            newFarmerId,
             session.userId,
             session.tenantId,
             businessName ? businessName.trim() : 'GreenValley Dairy',

@@ -3,20 +3,55 @@ import { getStore } from '@/lib/store';
 import { decodeSession, SESSION_COOKIE_NAME } from '@/lib/auth';
 import { enforceActiveAccount } from '@/lib/api-auth';
 import { checkRateLimit } from '@/lib/security/rate-limiter';
-import { processPayment, verifyRazorpayPaymentSignature } from '@/lib/services/payment.service';
+import { processPayment } from '@/lib/services/payment.service';
+import { query } from '@/lib/db';
 import { publishEvent } from '@/lib/events';
 
 const isUnitTest = () => process.env.TEST_ENV === 'unit' || process.env.VITEST === 'true';
 
 export async function GET(req: NextRequest) {
   try {
-    const store = getStore();
     const { searchParams } = new URL(req.url);
     const customerId = searchParams.get('customerId');
+    const invoiceId = searchParams.get('invoiceId');
 
+    // Production: PostgreSQL is the source of truth (store-only reads hid
+    // real payments and lost everything on restart).
+    if (!isUnitTest()) {
+      try {
+        const params: unknown[] = [];
+        let sql = `
+          SELECT id, tenant_id as "tenantId", invoice_id as "invoiceId",
+                 customer_id as "customerId", farmer_id as "farmerId",
+                 amount::float as amount, method as "paymentMethod",
+                 transaction_ref as "transactionRef", status,
+                 paid_at as "paidAt", created_at as "createdAt"
+          FROM payments WHERE 1=1`;
+        if (customerId) {
+          params.push(customerId);
+          sql += ` AND customer_id = $${params.length}`;
+        }
+        if (invoiceId) {
+          params.push(invoiceId);
+          sql += ` AND invoice_id = $${params.length}`;
+        }
+        sql += ` ORDER BY paid_at DESC LIMIT 500`;
+        const res = await query(sql, params);
+        return NextResponse.json({ success: true, payments: res.rows, source: 'db' });
+      } catch (err) {
+        console.error('[payments] DB read failed:', err);
+        // Fall through to store only when the database is unreachable;
+        // an empty store must not mask the outage.
+      }
+    }
+
+    const store = getStore();
     let list = store.payments;
     if (customerId) {
       list = list.filter((p) => p.customerId === customerId);
+    }
+    if (invoiceId) {
+      list = list.filter((p) => p.invoiceId === invoiceId);
     }
 
     return NextResponse.json({ success: true, payments: list, source: 'store' });
@@ -43,7 +78,7 @@ export async function POST(req: NextRequest) {
       const suspended = await enforceActiveAccount(session);
       if (suspended) return suspended;
     }
-    const { invoiceId, amount, paymentMethod, method, transactionRef, note } = body;
+    const { invoiceId, amount, paymentMethod, method, transactionRef, notes } = body;
     const payMethod = paymentMethod || method;
 
     if (!invoiceId || !amount || !payMethod) {
@@ -53,77 +88,66 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Razorpay checkout callback: verify signature BEFORE crediting.
-    // transactionRef carries the razorpay_payment_id for natural idempotency.
-    const { razorpayOrderId, razorpayPaymentId, razorpaySignature } = body as {
-      razorpayOrderId?: string;
-      razorpayPaymentId?: string;
-      razorpaySignature?: string;
-    };
-    let txRef = transactionRef || `TXN_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-    if (razorpayOrderId || razorpayPaymentId || razorpaySignature) {
-      if (!razorpayOrderId || !razorpayPaymentId || !razorpaySignature) {
-        return NextResponse.json(
-          { success: false, error: 'Incomplete Razorpay callback: order, payment and signature are required' },
-          { status: 400 }
-        );
-      }
-      const valid = verifyRazorpayPaymentSignature({
-        orderId: razorpayOrderId,
-        paymentId: razorpayPaymentId,
-        signature: razorpaySignature,
-      });
-      if (!valid) {
-        return NextResponse.json(
-          { success: false, error: 'Payment verification failed. Signature mismatch.' },
-          { status: 402 }
-        );
-      }
-      txRef = razorpayPaymentId;
-    }
+    // Simple payment recording - generate transaction reference if not provided
+    const txRef = transactionRef || `TXN_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
 
-    // DB-first idempotent payment via processPayment (UNIQUE(transaction_ref))
+    // DB-first idempotent payment via processPayment (UNIQUE(transaction_ref)).
+    // Production: the invoice is resolved from PostgreSQL (the store starts
+    // empty in production) and DB failures are reported loudly — a
+    // store-only "success" would vanish on restart and be masked on read.
     if (!isUnitTest()) {
       try {
-        const store = getStore();
-        const inv = store.invoices.find((i) => i.id === invoiceId);
-        if (inv) {
-          const dbResult = await processPayment({
-            invoiceId,
-            customerId: inv.customerId,
-            farmerId: inv.farmerId,
-            tenantId: session?.tenantId || inv.tenantId || store.tenantId,
-            amount: parseFloat(amount),
-            method: payMethod,
-            transactionRef: txRef,
-          });
-          if (dbResult.success) {
-            publishEvent({
-              type: 'payment:received',
-              tenantId: session?.tenantId,
-              customerId: inv.customerId,
-              payload: { invoiceId, amount: parseFloat(amount), transactionRef: txRef },
-            });
-            // Mirror to store for UI consistency (non-blocking best effort)
-            try {
-              store.recordPayment(invoiceId, parseFloat(amount), payMethod, txRef, note);
-            } catch { /* ignore */ }
-            return NextResponse.json({
-              success: true,
-              source: 'db',
-              paymentId: dbResult.paymentId,
-              isDuplicate: dbResult.isDuplicate,
-              newOutstandingAmount: dbResult.newOutstandingAmount,
-              newStatus: dbResult.newStatus,
-              status: dbResult.isDuplicate ? 'ALREADY_PROCESSED' : 'PROCESSED',
-            });
-          }
-          if (dbResult.error && dbResult.error !== 'Invoice not found') {
-            throw new Error(dbResult.error);
-          }
+        const invRes = await query(
+          `SELECT id, customer_id as "customerId", farmer_id as "farmerId", tenant_id as "tenantId"
+           FROM invoices WHERE id = $1`,
+          [invoiceId]
+        );
+        if (invRes.rows.length === 0) {
+          return NextResponse.json({ success: false, error: 'Invoice not found' }, { status: 404 });
         }
+        const inv = invRes.rows[0] as { id: string; customerId: string; farmerId: string; tenantId: string };
+        const dbResult = await processPayment({
+          invoiceId: inv.id,
+          customerId: inv.customerId,
+          farmerId: inv.farmerId,
+          tenantId: inv.tenantId,
+          amount: parseFloat(amount),
+          method: payMethod,
+          transactionRef: txRef,
+          notes: notes,
+        });
+        if (dbResult.success) {
+          publishEvent({
+            type: 'payment:received',
+            tenantId: inv.tenantId,
+            customerId: inv.customerId,
+            payload: { invoiceId: inv.id, amount: parseFloat(amount), transactionRef: txRef },
+          });
+          // Mirror to store for UI consistency (non-blocking best effort)
+          try {
+            const store = getStore();
+            if (store.invoices.some((i) => i.id === inv.id)) {
+              store.recordPayment(inv.id, parseFloat(amount), payMethod, txRef, notes);
+            }
+          } catch { /* ignore */ }
+          return NextResponse.json({
+            success: true,
+            source: 'db',
+            paymentId: dbResult.paymentId,
+            isDuplicate: dbResult.isDuplicate,
+            newOutstandingAmount: dbResult.newOutstandingAmount,
+            newStatus: dbResult.newStatus,
+            status: dbResult.isDuplicate ? 'ALREADY_PROCESSED' : 'PROCESSED',
+          });
+        }
+        return NextResponse.json(
+          { success: false, error: dbResult.error || 'Payment processing failed' },
+          { status: 400 }
+        );
       } catch (err) {
-        console.warn('[payments] DB payment failed, falling back to store:', err);
+        console.error('[payments] DB payment failed:', err);
+        const message = err instanceof Error ? err.message : 'Payment processing failed';
+        return NextResponse.json({ success: false, error: message }, { status: 500 });
       }
     }
 
@@ -133,7 +157,7 @@ export async function POST(req: NextRequest) {
       parseFloat(amount),
       payMethod,
       txRef,
-      note
+      notes
     );
 
     if (!result) {

@@ -1,13 +1,13 @@
 {
-  "name": "MilkFlow 2.0 — Dairy Delivery OS",
+  "name": "MilkFlow Private Reserve",
   "short_name": "MilkFlow",
-  "description": "Enterprise dairy management and milk delivery platform",
-  "start_url": "/admin",
+  "description": "Private wealth-grade dairy reserve, audit trail, and member concierge portal",
+  "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#ffffff",
-  "theme_color": "#10b981",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
   "icons": [
     {
       "src": "/icons/icon-192.png",
@@ -26,6 +26,22 @@
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Member Overview",
+      "short_name": "Overview",
+      "description": "Open private member overview and reserve status",
+      "url": "/customer/home",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Statements & Ledgers",
+      "short_name": "Statements",
+      "description": "View itemized statements and cryptographic audit receipts",
+      "url": "/customer/statements",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
     }
   ]
 }

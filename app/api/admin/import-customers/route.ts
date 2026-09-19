@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
+import crypto from 'crypto';
 import { authenticateRequest } from '@/lib/api-auth';
-import { query } from '@/lib/db';
+import { query, transaction } from '@/lib/db';
 import { generateRawInvitationToken, hashInvitationToken } from '@/lib/security/invitation-crypto';
 
 export interface CsvCustomerRow {
@@ -28,7 +29,15 @@ export async function POST(req: NextRequest) {
     }
 
     const tenantId = auth.user.tenantId;
-    const farmerId = auth.user.farmerId || 'F001';
+
+    let farmerId = auth.user.farmerId;
+    if (!farmerId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(farmerId)) {
+      const fp = await query(`SELECT id FROM farmer_profiles WHERE tenant_id = $1 ORDER BY created_at ASC LIMIT 1`, [tenantId]);
+      if (fp.rows.length === 0) {
+        return NextResponse.json({ success: false, error: 'No farmer profile found for this dairy.' }, { status: 400 });
+      }
+      farmerId = fp.rows[0].id as string;
+    }
 
     const errors: { row: number; phone: string; error: string }[] = [];
     const validRows: CsvCustomerRow[] = [];
@@ -59,7 +68,6 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // If dryRun mode (Preview phase)
     if (dryRun) {
       return NextResponse.json({
         success: true,
@@ -72,59 +80,59 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // If errors exist in actual execution mode and user expects clean import
-    if (errors.length > 0 && validRows.length === 0) {
+    if (validRows.length === 0) {
       return NextResponse.json({
         success: false,
-        error: 'All rows failed validation.',
+        error: 'Validation failed for all import rows.',
+        importedCount: 0,
+        errorCount: errors.length,
         errors,
       }, { status: 400 });
     }
 
     // Phase 2: Transactional Batch Creation in INVITED state
-    const createdCustomers = [];
-    await query('BEGIN');
+    const createdCustomers = await transaction(async (client) => {
+      const list = [];
+      for (const row of validRows) {
+        const userId = crypto.randomUUID();
+        const customerId = crypto.randomUUID();
+        const email = `${row.phone.replace(/[^0-9]/g, '')}_${customerId.slice(0, 6)}@milkflow.local`;
+        const qrToken = `qr_${customerId}`;
 
-    for (const row of validRows) {
-      const userId = `u_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-      const customerId = `c_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-      const email = `${row.phone.replace(/[^0-9]/g, '')}@milkflow.local`;
-      const qrToken = `qr_inv_${customerId}`;
+        // 1. Create User
+        await client.query(
+          `INSERT INTO users (id, tenant_id, email, phone, name, password_hash, password_salt, role, is_active, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, 'INVITED_PENDING_ACTIVATION', 'SALT', 'CUSTOMER', false, NOW(), NOW())`,
+          [userId, tenantId, email, row.phone, row.name]
+        );
 
-      // 1. Create User
-      await query(
-        `INSERT INTO users (id, tenant_id, email, phone, name, password_hash, password_salt, role, is_active, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, 'INVITED_PENDING_ACTIVATION', 'SALT', 'CUSTOMER', false, NOW(), NOW())`,
-        [userId, tenantId, email, row.phone, row.name]
-      );
+        // 2. Create Customer Profile in INVITED state
+        await client.query(
+          `INSERT INTO customer_profiles (id, user_id, tenant_id, farmer_id, delivery_address, milk_type, daily_quantity, qr_token, is_active, status, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false, 'INVITED', NOW(), NOW())`,
+          [customerId, userId, tenantId, farmerId, row.address, row.milkType, row.quantity, qrToken]
+        );
 
-      // 2. Create Customer Profile in INVITED state
-      await query(
-        `INSERT INTO customer_profiles (id, user_id, tenant_id, farmer_id, delivery_address, milk_type, daily_quantity, qr_token, is_active, status, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false, 'INVITED', NOW(), NOW())`,
-        [customerId, userId, tenantId, farmerId, row.address, row.milkType, row.quantity, qrToken]
-      );
+        // 3. Create Hashed Invitation Token
+        const rawToken = generateRawInvitationToken();
+        const tokenHash = hashInvitationToken(rawToken);
+        const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
 
-      // 3. Create Hashed Invitation Token
-      const rawToken = generateRawInvitationToken();
-      const tokenHash = hashInvitationToken(rawToken);
-      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+        await client.query(
+          `INSERT INTO customer_invitations (id, customer_id, token_hash, channel, expires_at, created_by_id, created_at)
+           VALUES (gen_random_uuid(), $1, $2, 'SMS', $3, $4, NOW())`,
+          [customerId, tokenHash, expiresAt.toISOString(), auth.user.userId]
+        );
 
-      await query(
-        `INSERT INTO customer_invitations (id, customer_id, token_hash, channel, expires_at, created_by_id, created_at)
-         VALUES (gen_random_uuid(), $1, $2, 'SMS', $3, $4, NOW())`,
-        [customerId, tokenHash, expiresAt.toISOString(), auth.user.userId]
-      );
-
-      createdCustomers.push({
-        customerId,
-        name: row.name,
-        phone: row.phone,
-        invitationToken: rawToken, // Provided once in import response for dispatch
-      });
-    }
-
-    await query('COMMIT');
+        list.push({
+          customerId,
+          name: row.name,
+          phone: row.phone,
+          invitationToken: rawToken,
+        });
+      }
+      return list;
+    });
 
     return NextResponse.json({
       success: true,
@@ -134,7 +142,6 @@ export async function POST(req: NextRequest) {
       createdCustomers,
     });
   } catch (err: unknown) {
-    await query('ROLLBACK').catch(() => {});
     const message = err instanceof Error ? err.message : 'Import failed';
     return NextResponse.json({ success: false, error: message }, { status: 500 });
   }

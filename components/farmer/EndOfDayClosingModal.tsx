@@ -1,24 +1,20 @@
 'use client';
 
 import React, { useState } from 'react';
-import {
-  Lock,
-  CheckCircle2,
-  AlertTriangle,
-  Droplets,
-  Scale,
-  Calendar,
-  X,
-  ShieldCheck,
-} from 'lucide-react';
+import { Lock, CheckCircle2, ArrowRight } from 'lucide-react';
+import { Sheet } from '@/components/ui/Sheet';
+import { Button } from '@/components/ui/Button';
+import { Input } from '@/components/ui/Input';
 
-interface EndOfDayClosingModalProps {
-  selectedDate: string;
-  totalDelivered: number;
-  totalExpected: number;
-  skippedCount: number;
+export interface EndOfDayClosingModalProps {
+  isOpen?: boolean;
   onClose: () => void;
-  onConfirmCloseDay: (data: {
+  date?: string;
+  selectedDate?: string;
+  totalDelivered: number;
+  totalExpected?: number;
+  skippedCount?: number;
+  onConfirmCloseDay?: (data: {
     cowMilkProduced: number;
     buffaloMilkProduced: number;
     a2MilkProduced: number;
@@ -26,244 +22,213 @@ interface EndOfDayClosingModalProps {
     wasteOrSpillage: number;
     personalConsumption: number;
   }) => Promise<void>;
+  onConfirmClose?: (data: {
+    productionQuantity: number;
+    deliveredQuantity: number;
+    wasteQuantity: number;
+    personalQuantity: number;
+    variance: number;
+  }) => Promise<void>;
 }
 
-export default function EndOfDayClosingModal({
+export function EndOfDayClosingModal({
+  isOpen = true,
+  onClose,
+  date,
   selectedDate,
   totalDelivered,
-  totalExpected,
-  skippedCount,
-  onClose,
+  totalExpected = 0,
+  skippedCount = 0,
   onConfirmCloseDay,
+  onConfirmClose,
 }: EndOfDayClosingModalProps) {
-  const [cowProduced, setCowProduced] = useState('55.0');
-  const [buffaloProduced, setBuffaloProduced] = useState('22.0');
-  const [a2Produced, setA2Produced] = useState('8.0');
-  const [remainingStock, setRemainingStock] = useState(
-    Math.max(0, 85 - totalDelivered - 2.0).toFixed(1)
-  );
-  const [waste, setWaste] = useState('1.0');
-  const [personal, setPersonal] = useState('1.0');
-  const [isClosing, setIsClosing] = useState(false);
-  const [errorMsg, setErrorMsg] = useState('');
+  const effectiveDate = selectedDate || date || new Date().toISOString().split('T')[0];
+  const [productionQty, setProductionQty] = useState<string>(String(totalDelivered + 2));
+  const [wasteQty, setWasteQty] = useState<string>('0.5');
+  const [personalQty, setPersonalQty] = useState<string>('1.5');
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [step, setStep] = useState<1 | 2>(1);
+  const [error, setError] = useState<string>('');
 
-  const totalProduced =
-    (parseFloat(cowProduced) || 0) +
-    (parseFloat(buffaloProduced) || 0) +
-    (parseFloat(a2Produced) || 0);
+  const prod = parseFloat(productionQty) || 0;
+  const waste = parseFloat(wasteQty) || 0;
+  const personal = parseFloat(personalQty) || 0;
+  const totalAccounted = totalDelivered + waste + personal;
+  const variance = parseFloat((prod - totalAccounted).toFixed(2));
 
-  const accounted =
-    totalDelivered +
-    (parseFloat(remainingStock) || 0) +
-    (parseFloat(waste) || 0) +
-    (parseFloat(personal) || 0);
-
-  const discrepancy = parseFloat((totalProduced - accounted).toFixed(1));
-  const isBalanced = Math.abs(discrepancy) < 0.1;
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsClosing(true);
-    setErrorMsg('');
+  const handleFinalize = async () => {
+    setIsSubmitting(true);
+    setError('');
     try {
-      await onConfirmCloseDay({
-        cowMilkProduced: parseFloat(cowProduced),
-        buffaloMilkProduced: parseFloat(buffaloProduced),
-        a2MilkProduced: parseFloat(a2Produced),
-        remainingStock: parseFloat(remainingStock),
-        wasteOrSpillage: parseFloat(waste),
-        personalConsumption: parseFloat(personal),
-      });
+      if (onConfirmCloseDay) {
+        await onConfirmCloseDay({
+          cowMilkProduced: prod,
+          buffaloMilkProduced: 0,
+          a2MilkProduced: 0,
+          remainingStock: variance > 0 ? variance : 0,
+          wasteOrSpillage: waste,
+          personalConsumption: personal,
+        });
+      } else if (onConfirmClose) {
+        await onConfirmClose({
+          productionQuantity: prod,
+          deliveredQuantity: totalDelivered,
+          wasteQuantity: waste,
+          personalQuantity: personal,
+          variance,
+        });
+      }
       onClose();
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Error closing day');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to lock daily closing record.');
     } finally {
-      setIsClosing(false);
+      setIsSubmitting(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 overflow-y-auto">
-      <div className="bg-white w-full max-w-lg rounded-3xl shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50/70">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-xl bg-slate-900 text-white flex items-center justify-center">
-              <Lock className="w-4 h-4 text-emerald-400" />
-            </div>
-            <div>
-              <h3 className="text-sm font-bold text-slate-900">End-of-Day Ledger Closing</h3>
-              <p className="text-[11px] text-slate-500">Date: {selectedDate} • Daily Milk Balance</p>
-            </div>
+    <Sheet
+      isOpen={isOpen}
+      onClose={onClose}
+      title="End-of-Day Ledger Closing"
+      description={`Balance production and finalize delivery records for ${effectiveDate}.`}
+    >
+      <div className="space-y-4">
+        {error && (
+          <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 text-xs rounded-xl font-medium">
+            {error}
           </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-xl hover:bg-slate-100 text-slate-400 hover:text-slate-700"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
+        )}
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-4 text-xs">
-          {/* Deliveries Summary Banner */}
-          <div className="grid grid-cols-3 gap-2 p-3.5 bg-slate-50 rounded-2xl border border-slate-200 text-center">
-            <div>
-              <div className="text-[10px] text-slate-400 uppercase font-bold">Delivered</div>
-              <div className="text-base font-black text-emerald-700 font-mono mt-0.5">
-                {totalDelivered} L
+        {step === 1 ? (
+          <div className="space-y-4">
+            <div className="p-4 bg-emerald-50 rounded-2xl border border-emerald-200 text-emerald-900">
+              <div className="flex justify-between items-start">
+                <div>
+                  <span className="text-xs font-black uppercase tracking-wider text-emerald-800">
+                    Delivered Today
+                  </span>
+                  <div className="text-2xl font-black mt-1">
+                    {totalDelivered} <span className="text-sm font-bold text-emerald-700">Litres</span>
+                  </div>
+                </div>
+                {totalExpected > 0 && (
+                  <div className="text-right text-xs">
+                    <div className="text-emerald-700 font-bold">Scheduled: {totalExpected}L</div>
+                    {skippedCount > 0 && <div className="text-amber-700 font-semibold">{skippedCount} skipped</div>}
+                  </div>
+                )}
               </div>
+              <p className="text-[11px] text-emerald-800/80 mt-1">
+                Calculated directly from confirmed daily customer deliveries.
+              </p>
             </div>
-            <div>
-              <div className="text-[10px] text-slate-400 uppercase font-bold">Scheduled</div>
-              <div className="text-base font-black text-slate-800 font-mono mt-0.5">
-                {totalExpected} L
-              </div>
-            </div>
-            <div>
-              <div className="text-[10px] text-rose-500 uppercase font-bold">Exceptions</div>
-              <div className="text-base font-black text-rose-600 font-mono mt-0.5">
-                {skippedCount} Skips
-              </div>
-            </div>
-          </div>
 
-          {/* Morning Production Inputs */}
-          <div>
-            <label className="font-bold text-slate-700 block mb-1">
-              Morning Milking Production (Litres):
-            </label>
-            <div className="grid grid-cols-3 gap-2">
-              <div>
-                <span className="text-[10px] text-slate-500 block">Cow Milk:</span>
-                <input
-                  type="number"
-                  step="0.5"
-                  required
-                  value={cowProduced}
-                  onChange={(e) => setCowProduced(e.target.value)}
-                  className="w-full px-2.5 py-1.5 rounded-xl border border-slate-200 font-mono font-bold focus:outline-none focus:border-emerald-500"
-                />
-              </div>
-              <div>
-                <span className="text-[10px] text-slate-500 block">Buffalo Milk:</span>
-                <input
-                  type="number"
-                  step="0.5"
-                  required
-                  value={buffaloProduced}
-                  onChange={(e) => setBuffaloProduced(e.target.value)}
-                  className="w-full px-2.5 py-1.5 rounded-xl border border-slate-200 font-mono font-bold focus:outline-none focus:border-emerald-500"
-                />
-              </div>
-              <div>
-                <span className="text-[10px] text-slate-500 block">A2 Desi Cow:</span>
-                <input
-                  type="number"
-                  step="0.5"
-                  required
-                  value={a2Produced}
-                  onChange={(e) => setA2Produced(e.target.value)}
-                  className="w-full px-2.5 py-1.5 rounded-xl border border-slate-200 font-mono font-bold focus:outline-none focus:border-emerald-500"
-                />
-              </div>
-            </div>
-            <div className="text-right text-[11px] font-bold text-slate-600 mt-1 font-mono">
-              Total Produced: {totalProduced} L
-            </div>
-          </div>
+            <Input
+              label="Total Milk Milked / Produced Today (Litres)"
+              type="number"
+              step="0.5"
+              min="0"
+              value={productionQty}
+              onChange={(e) => setProductionQty(e.target.value)}
+              placeholder="e.g. 50"
+              helperText="Enter morning + evening yield from your dairy cows/buffaloes."
+            />
 
-          {/* Inventory Breakdown Inputs */}
-          <div className="grid grid-cols-3 gap-2">
-            <div>
-              <label className="font-bold text-slate-700 block mb-1">Remaining Tank</label>
-              <input
+            <div className="grid grid-cols-2 gap-3">
+              <Input
+                label="Home / Personal Use (L)"
                 type="number"
-                step="0.5"
-                required
-                value={remainingStock}
-                onChange={(e) => setRemainingStock(e.target.value)}
-                className="w-full px-2.5 py-1.5 rounded-xl border border-slate-200 font-mono font-bold focus:outline-none focus:border-emerald-500"
+                step="0.25"
+                min="0"
+                value={personalQty}
+                onChange={(e) => setPersonalQty(e.target.value)}
+                placeholder="e.g. 1.5"
+              />
+              <Input
+                label="Spilled / Waste Milk (L)"
+                type="number"
+                step="0.25"
+                min="0"
+                value={wasteQty}
+                onChange={(e) => setWasteQty(e.target.value)}
+                placeholder="e.g. 0.5"
               />
             </div>
-            <div>
-              <label className="font-bold text-slate-700 block mb-1">Spillage / Waste</label>
-              <input
-                type="number"
-                step="0.1"
-                required
-                value={waste}
-                onChange={(e) => setWaste(e.target.value)}
-                className="w-full px-2.5 py-1.5 rounded-xl border border-slate-200 font-mono font-bold focus:outline-none focus:border-emerald-500"
-              />
-            </div>
-            <div>
-              <label className="font-bold text-slate-700 block mb-1">Personal / Home</label>
-              <input
-                type="number"
-                step="0.5"
-                required
-                value={personal}
-                onChange={(e) => setPersonal(e.target.value)}
-                className="w-full px-2.5 py-1.5 rounded-xl border border-slate-200 font-mono font-bold focus:outline-none focus:border-emerald-500"
-              />
-            </div>
-          </div>
 
-          {/* Dairy Reconciliation Equation Banner */}
-          <div
-            className={`p-3.5 rounded-2xl border text-xs flex items-center justify-between ${
-              isBalanced
-                ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
-                : 'bg-amber-50 border-amber-200 text-amber-900'
-            }`}
-          >
-            <div className="flex items-center gap-2">
-              <Scale className="w-4 h-4" />
-              <div>
-                <span className="font-bold">Reconciliation Balance: </span>
-                <span className="font-mono">
-                  {totalProduced} L Produced vs {accounted} L Accounted
+            <Button
+              variant="primary"
+              onClick={() => setStep(2)}
+              className="w-full mt-2"
+              rightIcon={<ArrowRight className="w-4 h-4" />}
+            >
+              Review Reconciliation Summary
+            </Button>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {/* Reconciliation Table */}
+            <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2 text-xs">
+              <div className="flex justify-between font-bold text-slate-700">
+                <span>Total Production:</span>
+                <span>{prod} L</span>
+              </div>
+              <div className="flex justify-between text-slate-600">
+                <span>Customer Delivered:</span>
+                <span>- {totalDelivered} L</span>
+              </div>
+              <div className="flex justify-between text-slate-600">
+                <span>Personal Consumption:</span>
+                <span>- {personal} L</span>
+              </div>
+              <div className="flex justify-between text-slate-600">
+                <span>Spilled / Waste:</span>
+                <span>- {waste} L</span>
+              </div>
+              <div className="pt-2 border-t border-slate-200 flex justify-between font-black text-slate-900 text-sm">
+                <span>Closing Variance:</span>
+                <span
+                  className={
+                    variance === 0
+                      ? 'text-emerald-600'
+                      : variance > 0
+                      ? 'text-blue-600'
+                      : 'text-rose-600'
+                  }
+                >
+                  {variance > 0 ? `+${variance}` : variance} L
                 </span>
               </div>
             </div>
-            <span
-              className={`px-2 py-0.5 rounded-full font-bold font-mono ${
-                isBalanced ? 'bg-emerald-200 text-emerald-900' : 'bg-amber-200 text-amber-900'
-              }`}
-            >
-              Diff: {discrepancy > 0 ? `+${discrepancy}` : discrepancy} L
-            </span>
-          </div>
 
-          <div className="p-3 bg-slate-50 rounded-2xl text-[11px] text-slate-500 flex items-start gap-2">
-            <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-            <span>
-              Closing locks today's ledger. Future modifications will require explicit authorized
-              audit adjustments and cannot silently overwrite records.
-            </span>
-          </div>
+            {/* Lock Notice */}
+            <div className="p-3 bg-amber-50 rounded-2xl border border-amber-200 flex items-start gap-2.5 text-xs text-amber-900">
+              <Lock className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+              <div>
+                <strong>Audit Lock:</strong> Finalizing this closing locks the delivery records for{' '}
+                {date}. Any subsequent edits will require an authorized adjustment.
+              </div>
+            </div>
 
-          {errorMsg && <p className="text-rose-600 font-bold">{errorMsg}</p>}
-
-          <div className="pt-3 border-t border-slate-200 flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 rounded-xl text-slate-600 hover:bg-slate-100 font-semibold"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={isClosing}
-              className="px-5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold shadow-xs transition flex items-center gap-1.5"
-            >
-              <Lock className="w-3.5 h-3.5 text-emerald-400" />
-              <span>{isClosing ? 'Finalizing & Locking...' : 'Lock Ledger & Close Day'}</span>
-            </button>
+            <div className="flex items-center gap-3 pt-2">
+              <Button variant="outline" onClick={() => setStep(1)} className="flex-1">
+                Back
+              </Button>
+              <Button
+                variant="primary"
+                isLoading={isSubmitting}
+                onClick={handleFinalize}
+                className="flex-1"
+                leftIcon={<CheckCircle2 className="w-4 h-4" />}
+              >
+                Confirm &amp; Lock Day
+              </Button>
+            </div>
           </div>
-        </form>
+        )}
       </div>
-    </div>
+    </Sheet>
   );
 }
+
+export default EndOfDayClosingModal;

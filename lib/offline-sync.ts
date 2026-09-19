@@ -112,6 +112,104 @@ export async function flushOfflineQueue(): Promise<{ flushed: number; remaining:
   return { flushed, remaining };
 }
 
+export interface QueuedPaymentIntent {
+  id: string;
+  type: string;
+  amount: number;
+  invoiceId?: string;
+  method?: string;
+  createdAt: string;
+}
+
+const PAYMENT_STORE = 'milkflow_payment_intents';
+
+function openPaymentDb(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    if (typeof indexedDB === 'undefined') {
+      reject(new Error('IndexedDB unavailable'));
+      return;
+    }
+    const req = indexedDB.open(DB_NAME, DB_VERSION + 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(STORE)) {
+        db.createObjectStore(STORE, { keyPath: 'queueId', autoIncrement: true });
+      }
+      if (!db.objectStoreNames.contains(PAYMENT_STORE)) {
+        db.createObjectStore(PAYMENT_STORE, { keyPath: 'id' });
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error || new Error('IndexedDB open failed'));
+  });
+}
+
+export async function queuePaymentIntent(intent: Omit<QueuedPaymentIntent, 'createdAt'>): Promise<void> {
+  const db = await openPaymentDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(PAYMENT_STORE, 'readwrite');
+    const store = tx.objectStore(PAYMENT_STORE);
+    store.put({ ...intent, createdAt: new Date().toISOString() });
+    tx.oncomplete = () => {
+      db.close();
+      resolve();
+    };
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+export async function listQueuedPaymentIntents(): Promise<QueuedPaymentIntent[]> {
+  try {
+    const db = await openPaymentDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(PAYMENT_STORE, 'readonly');
+      const req = tx.objectStore(PAYMENT_STORE).getAll();
+      req.onsuccess = () => resolve((req.result as QueuedPaymentIntent[]) || []);
+      req.onerror = () => reject(req.error);
+      tx.oncomplete = () => db.close();
+    });
+  } catch {
+    return [];
+  }
+}
+
+export async function clearQueuedPaymentIntent(id: string): Promise<void> {
+  const db = await openPaymentDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(PAYMENT_STORE, 'readwrite');
+    const req = tx.objectStore(PAYMENT_STORE).delete(id);
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+    tx.oncomplete = () => db.close();
+  });
+}
+
+export async function syncWhenOnline(): Promise<void> {
+  if (typeof window === 'undefined' || !navigator.onLine) return;
+  const intents = await listQueuedPaymentIntents();
+  for (const intent of intents) {
+    try {
+      const res = await fetch('/api/payments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(intent),
+      });
+      if (res.ok) {
+        await clearQueuedPaymentIntent(intent.id);
+      }
+    } catch {
+      break;
+    }
+  }
+  await flushOfflineQueue();
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('online', () => {
+    syncWhenOnline().catch(() => undefined);
+  });
+}
+
 /**
  * Register the service worker (idempotent).
  */
@@ -121,3 +219,4 @@ export function registerServiceWorker() {
     navigator.serviceWorker.register('/sw.js').catch(() => undefined);
   });
 }
+

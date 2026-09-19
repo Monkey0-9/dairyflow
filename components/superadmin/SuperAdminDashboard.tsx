@@ -18,6 +18,7 @@ import {
   Layers,
   ArrowUpRight,
   TrendingUp,
+  Clock,
 } from 'lucide-react';
 
 export default function SuperAdminDashboard() {
@@ -27,6 +28,8 @@ export default function SuperAdminDashboard() {
   const [searchQuery, setSearchQuery] = useState('');
   const [isVerifyingAudit, setIsVerifyingAudit] = useState(false);
   const [auditResult, setAuditResult] = useState<any>(null);
+  // Failed verifications must not masquerade as either state.
+  const [auditError, setAuditError] = useState<string | null>(null);
 
   const fetchPlatformData = async () => {
     setLoading(true);
@@ -50,12 +53,16 @@ export default function SuperAdminDashboard() {
 
   const handleVerifyAuditChain = async () => {
     setIsVerifyingAudit(true);
+    setAuditError(null);
     try {
       const res = await fetch('/api/audit/verify');
-      const json = await res.json();
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json || typeof json.valid !== 'boolean') {
+        throw new Error(json?.error || `Verification failed (${res.status}). Status unknown — not marked either way.`);
+      }
       setAuditResult(json);
     } catch (e) {
-      console.error('Audit verification error:', e);
+      setAuditError(e instanceof Error ? e.message : 'Audit verification failed. Status unknown.');
     } finally {
       setIsVerifyingAudit(false);
     }
@@ -195,7 +202,7 @@ export default function SuperAdminDashboard() {
           { id: 'overview', label: 'Platform Overview', icon: Layers },
           { id: 'tenants', label: `Tenants (${tenants.length})`, icon: Building2 },
           { id: 'farmers', label: `Farmers (${farmers.length})`, icon: Users },
-          { id: 'customers', label: `Customers (${customers.length})`, icon: Users },
+          { id: 'customers', label: `Clients (${customers.length})`, icon: Users },
           { id: 'payments', label: 'Payments', icon: CreditCard },
           { id: 'activity', label: 'Audit Trail', icon: Activity },
           { id: 'health', label: 'System Health', icon: Server },
@@ -260,9 +267,18 @@ export default function SuperAdminDashboard() {
                   <span>SHA-256 Cryptographic Chain Status</span>
                 </h2>
                 <span className={`text-xs font-bold px-2.5 py-1 rounded-full flex items-center gap-1.5 ${
-                  auditResult?.valid ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-rose-50 text-rose-700 border border-rose-200'
+                  !auditResult
+                    ? 'bg-slate-100 text-slate-600 border border-slate-200'
+                    : auditResult.valid
+                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                      : 'bg-rose-50 text-rose-700 border border-rose-200'
                 }`}>
-                  {auditResult?.valid ? (
+                  {!auditResult ? (
+                    <>
+                      <Clock className="w-3.5 h-3.5 text-slate-500" />
+                      <span>Not verified yet</span>
+                    </>
+                  ) : auditResult.valid ? (
                     <>
                       <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
                       <span>Validated ({auditResult.totalBlocks} Blocks)</span>
@@ -275,6 +291,11 @@ export default function SuperAdminDashboard() {
                   )}
                 </span>
               </div>
+              {auditError && (
+                <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800" role="alert">
+                  <span className="font-bold">Verification inconclusive: </span>{auditError}
+                </div>
+              )}
               <p className="text-xs text-slate-500 leading-relaxed">
                 All high-impact mutations (Day Closing, Dispute Resolution, Invoice Adjustments) are cryptographically linked using SHA-256 parent hashing. Any unauthorized database modification breaks hash continuity.
               </p>
@@ -375,16 +396,16 @@ export default function SuperAdminDashboard() {
         </div>
       )}
 
-      {/* TAB 4: Cross-Tenant Customers */}
+      {/* TAB 4: Cross-Tenant Clients */}
       {activeTab === 'customers' && (
         <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-base font-bold text-slate-900">Platform Cross-Tenant Customer Registry</h2>
+            <h2 className="text-base font-bold text-slate-900">Platform Cross-Tenant Client Registry</h2>
             <div className="relative">
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
               <input
                 type="text"
-                placeholder="Search customers..."
+                placeholder="Search clients..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="pl-9 pr-4 py-1.5 text-xs rounded-xl border border-slate-200 focus:outline-hidden focus:ring-2 focus:ring-purple-500 w-52"
@@ -395,7 +416,7 @@ export default function SuperAdminDashboard() {
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-50 text-slate-600 uppercase font-semibold border-b border-slate-200">
                 <tr>
-                  <th className="py-3 px-4">Customer Name</th>
+                  <th className="py-3 px-4">Client Name</th>
                   <th className="py-3 px-4">Phone</th>
                   <th className="py-3 px-4">Assigned Farmer</th>
                   <th className="py-3 px-4">Milk Type</th>

@@ -26,8 +26,9 @@ import {
 interface DeliveryRouteViewProps {
   customers: CustomerProfile[];
   records: DeliveryRecord[];
-  onQuickDeliver: (record: DeliveryRecord) => void;
-  onQuickSkip: (record: DeliveryRecord) => void;
+  onQuickDeliver: (record: DeliveryRecord) => Promise<unknown>;
+  onQuickSkip: (record: DeliveryRecord) => Promise<unknown>;
+  onRefresh?: () => void;
 }
 
 export default function DeliveryRouteView({
@@ -35,6 +36,7 @@ export default function DeliveryRouteView({
   records,
   onQuickDeliver,
   onQuickSkip,
+  onRefresh,
 }: DeliveryRouteViewProps) {
   const [routeStops, setRouteStops] = useState<CustomerProfile[]>(
     [...customers].sort((a, b) => a.deliverySequence - b.deliverySequence)
@@ -44,6 +46,25 @@ export default function DeliveryRouteView({
   const [isOffline, setIsOffline] = useState(false);
   const [pendingSync, setPendingSync] = useState(0);
   const [syncNotice, setSyncNotice] = useState<string | null>(null);
+  // Failed Drop/Skip taps surface here instead of leaving a stale badge.
+  const [routeError, setRouteError] = useState<string | null>(null);
+  const [busyRecordId, setBusyRecordId] = useState<string | null>(null);
+
+  // Keep the stop list in sync when customers change (new signups, edits).
+  useEffect(() => {
+    setRouteStops((prev) => {
+      const prevIds = new Set(prev.map((c) => c.id));
+      const merged = [...prev];
+      for (const c of customers) {
+        if (!prevIds.has(c.id)) merged.push(c);
+      }
+      const liveIds = new Set(customers.map((c) => c.id));
+      return merged
+        .filter((c) => liveIds.has(c.id))
+        .map((c) => customers.find((u) => u.id === c.id) || c)
+        .sort((a, b) => a.deliverySequence - b.deliverySequence);
+    });
+  }, [customers]);
 
   useEffect(() => {
     registerServiceWorker();
@@ -60,8 +81,9 @@ export default function DeliveryRouteView({
       }));
       setPendingSync(remaining);
       if (flushed > 0) {
-        setSyncNotice(`Back online — synced ${flushed} queued deliver${flushed === 1 ? 'y' : 'ies'}.`);
+        setSyncNotice(`Back online — synced ${flushed} queued deliver${flushed === 1 ? 'y' : 'ies'}. Refreshing route…`);
         window.setTimeout(() => setSyncNotice(null), 5000);
+        onRefresh?.();
       }
     };
     window.addEventListener('offline', update);
@@ -84,7 +106,15 @@ export default function DeliveryRouteView({
       setPendingSync((n) => n + 1);
       return;
     }
-    onQuickDeliver(record);
+    setRouteError(null);
+    setBusyRecordId(record.id);
+    try {
+      await onQuickDeliver(record);
+    } catch (err) {
+      setRouteError(err instanceof Error ? err.message : 'Drop failed to save. Please retry.');
+    } finally {
+      setBusyRecordId(null);
+    }
   };
 
   const handleSkip = async (record: DeliveryRecord) => {
@@ -100,7 +130,15 @@ export default function DeliveryRouteView({
       setPendingSync((n) => n + 1);
       return;
     }
-    onQuickSkip(record);
+    setRouteError(null);
+    setBusyRecordId(record.id);
+    try {
+      await onQuickSkip(record);
+    } catch (err) {
+      setRouteError(err instanceof Error ? err.message : 'Skip failed to save. Please retry.');
+    } finally {
+      setBusyRecordId(null);
+    }
   };
 
   // Simulate AI Route Optimization (TSP nearest-neighbor heuristic)
@@ -148,6 +186,12 @@ export default function DeliveryRouteView({
           {syncNotice}
         </div>
       )}
+      {routeError && (
+        <div role="alert" className="p-3 rounded-2xl bg-red-50 border border-red-200 text-red-800 text-xs font-bold flex items-center justify-between gap-2">
+          <span>Not saved: {routeError}</span>
+          <button onClick={() => setRouteError(null)} className="font-extrabold" aria-label="Dismiss error">✕</button>
+        </div>
+      )}
       {/* Header Bar */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-5 rounded-3xl border border-slate-200 shadow-xs">
         <div>
@@ -183,7 +227,7 @@ export default function DeliveryRouteView({
       {optimizedNotice && (
         <div className="p-4 rounded-2xl bg-emerald-100 border border-emerald-300 text-emerald-900 text-xs font-bold flex items-center justify-between animate-in fade-in">
           <span>
-            ✨ Route sequence optimized! Saved approx 3.4 km and 18 minutes of delivery transit time.
+            ✨ Route stops rearranged alphabetically for this view only — the saved server order is unchanged.
           </span>
           <button onClick={() => setOptimizedNotice(false)} className="text-emerald-700 font-extrabold">
             ✕
@@ -314,15 +358,17 @@ export default function DeliveryRouteView({
                         <div className="flex items-center gap-1.5 mt-1">
                           <button
                             onClick={() => void handleDrop(record)}
-                            className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[11px] font-bold shadow-xs transition"
+                            disabled={busyRecordId === record.id}
+                            className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-lg text-[11px] font-bold shadow-xs transition"
                           >
-                            ✓ Drop
+                            {busyRecordId === record.id ? '…' : '✓ Drop'}
                           </button>
                           <button
                             onClick={() => void handleSkip(record)}
-                            className="px-2.5 py-1 bg-slate-100 hover:bg-rose-50 text-slate-700 hover:text-rose-800 rounded-lg text-[11px] font-bold transition"
+                            disabled={busyRecordId === record.id}
+                            className="px-2.5 py-1 bg-slate-100 hover:bg-rose-50 disabled:opacity-50 text-slate-700 hover:text-rose-800 rounded-lg text-[11px] font-bold transition"
                           >
-                            Skip
+                            {busyRecordId === record.id ? '…' : 'Skip'}
                           </button>
                         </div>
                       )}

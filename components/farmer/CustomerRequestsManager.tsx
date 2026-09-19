@@ -41,6 +41,8 @@ export default function CustomerRequestsManager({
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
   const [rejectModalItem, setRejectModalItem] = useState<{ id: string; type: 'PAUSE' | 'MILK'; customerName: string } | null>(null);
   const [rejectionNote, setRejectionNote] = useState('');
+  // Failed reviews keep the request PENDING with the server message.
+  const [reviewError, setReviewError] = useState<string | null>(null);
 
   const pendingPauses = pauseRequests.filter((p) => p.status === 'PENDING');
   const pendingMilk = milkRequests.filter((m) => m.status === 'PENDING');
@@ -48,12 +50,15 @@ export default function CustomerRequestsManager({
 
   const handleApprove = async (id: string, type: 'PAUSE' | 'MILK') => {
     setActionLoadingId(id);
+    setReviewError(null);
     try {
       if (type === 'PAUSE') {
         await onReviewPause(id, 'APPROVED');
       } else {
         await onReviewMilk(id, 'APPROVED');
       }
+    } catch (err) {
+      setReviewError(err instanceof Error ? err.message : 'Approval failed to save. Please retry.');
     } finally {
       setActionLoadingId(null);
     }
@@ -62,14 +67,18 @@ export default function CustomerRequestsManager({
   const handleConfirmReject = async () => {
     if (!rejectModalItem) return;
     setActionLoadingId(rejectModalItem.id);
+    setReviewError(null);
     try {
       if (rejectModalItem.type === 'PAUSE') {
         await onReviewPause(rejectModalItem.id, 'REJECTED', rejectionNote);
       } else {
         await onReviewMilk(rejectModalItem.id, 'REJECTED', rejectionNote);
       }
+      // Parents throw on failure — reaching here means the review saved.
       setRejectModalItem(null);
       setRejectionNote('');
+    } catch (err) {
+      setReviewError(err instanceof Error ? err.message : 'Rejection failed to save. Please retry.');
     } finally {
       setActionLoadingId(null);
     }
@@ -112,6 +121,11 @@ export default function CustomerRequestsManager({
 
   return (
     <div className="space-y-6">
+      {reviewError && (
+        <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-800" role="alert">
+          <span className="font-bold">Review not saved: </span>{reviewError}
+        </div>
+      )}
       {/* Header Banner */}
       <div className="bg-gradient-to-r from-emerald-800 to-teal-900 rounded-3xl p-6 text-white shadow-xl relative overflow-hidden">
         <div className="absolute right-0 top-0 w-96 h-96 bg-white/5 rounded-full blur-3xl -mr-20 -mt-20 pointer-events-none" />

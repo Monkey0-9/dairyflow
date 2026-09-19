@@ -1,15 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getStore } from '@/lib/store';
 import { query } from '@/lib/db';
 import { processPayment } from '@/lib/services/payment.service';
 import { checkRateLimit } from '@/lib/security/rate-limiter';
+import { getStore } from '@/lib/store';
+import { isTestMode } from '@/lib/db-scope';
 import crypto from 'crypto';
 
-// Secret key for payment webhook HMAC verification
-const WEBHOOK_SECRET = process.env.RAZORPAY_WEBHOOK_SECRET || 'whsec_milkflow_prod_demo_key_9812';
-
-// Only money-movement events are processed; everything else is acknowledged
-// without ledger mutation (prevents test/ping events from crediting invoices).
 const CREDITABLE_EVENTS = new Set(['payment.captured', 'order.paid']);
 
 export async function POST(req: NextRequest) {
@@ -24,18 +20,25 @@ export async function POST(req: NextRequest) {
     }
     const rawBody = await req.text();
     const signature = req.headers.get('x-razorpay-signature') || req.headers.get('x-webhook-signature');
+    const secret = process.env.RAZORPAY_WEBHOOK_SECRET || 'whsec_milkflow_prod_demo_key_9812';
 
-    // Signature verification is mandatory in production; in non-production
-    // unsigned demo payloads (existing tests) are still accepted.
+    if (process.env.NODE_ENV === 'production' && !process.env.RAZORPAY_WEBHOOK_SECRET) {
+      return NextResponse.json(
+        { success: false, error: 'Server misconfigured: RAZORPAY_WEBHOOK_SECRET missing in production environment.' },
+        { status: 500 }
+      );
+    }
+
     if (process.env.NODE_ENV === 'production' && !signature) {
       return NextResponse.json(
         { success: false, error: 'Missing webhook HMAC signature' },
         { status: 401 }
       );
     }
+
     if (signature) {
       const expectedSignature = crypto
-        .createHmac('sha256', WEBHOOK_SECRET)
+        .createHmac('sha256', secret)
         .update(rawBody)
         .digest('hex');
 
@@ -49,14 +52,12 @@ export async function POST(req: NextRequest) {
 
     const payload = JSON.parse(rawBody);
 
-    // Acknowledge non-creditable Razorpay events without touching the ledger.
     if (payload.event && !CREDITABLE_EVENTS.has(payload.event) && !payload.transactionRef) {
       return NextResponse.json({ success: true, status: 'IGNORED', event: payload.event });
     }
 
     let { transactionRef, invoiceId, amount, paymentMethod, note } = payload;
 
-    // Support standard Razorpay webhook event payloads
     if (!invoiceId && (payload.event === 'payment.captured' || payload.event === 'order.paid')) {
       const entity = payload.payload?.payment?.entity;
       if (entity) {
@@ -75,77 +76,55 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const store = getStore();
-
-    // In-memory store processing (for tests and quick state)
-    const result = store.recordPayment(
-      invoiceId,
-      parseFloat(amount),
-      paymentMethod || 'UPI',
-      transactionRef,
-      note || 'Webhook payment confirmation'
+    // DB-First persistent payment processing inside transaction
+    const dbInv = await query(
+      `SELECT id, customer_id as "customerId", farmer_id as "farmerId", tenant_id as "tenantId" FROM invoices WHERE id = $1`,
+      [invoiceId]
     );
 
-    if (!result) {
-      // Direct PostgreSQL fallback for DB-persisted invoices
-      try {
-        const dbInv = await query(`SELECT * FROM invoices WHERE id = $1`, [invoiceId]);
-        if (dbInv.rows.length > 0) {
-          const inv = dbInv.rows[0];
-          await processPayment({
-            invoiceId,
-            customerId: inv.customer_id,
-            farmerId: inv.farmer_id,
-            tenantId: inv.tenant_id,
-            amount: parseFloat(amount),
-            method: paymentMethod || 'UPI',
-            transactionRef,
-          });
-          return NextResponse.json({
-            success: true,
-            status: 'PROCESSED',
-            message: 'Payment recorded in PostgreSQL database',
-            transactionRef,
-          });
-        }
-      } catch (dbErr) {
-        console.warn('[Webhook] DB payment recording error:', dbErr);
-      }
-      return NextResponse.json({ success: false, error: 'Invoice not found' }, { status: 404 });
-    }
+    if (dbInv.rows.length > 0) {
+      const inv = dbInv.rows[0];
+      const result = await processPayment({
+        invoiceId: inv.id,
+        customerId: inv.customerId,
+        farmerId: inv.farmerId,
+        tenantId: inv.tenantId,
+        amount: parseFloat(amount),
+        method: paymentMethod || 'UPI',
+        transactionRef,
+      });
 
-    // Database-level persistent idempotent payment recording
-    try {
-      const targetInvoice = store.invoices.find((i) => i.id === invoiceId);
-      if (targetInvoice) {
-        await processPayment({
-          invoiceId,
-          customerId: targetInvoice.customerId,
-          farmerId: targetInvoice.farmerId,
-          tenantId: store.tenantId,
-          amount: parseFloat(amount),
-          method: paymentMethod || 'UPI',
-          transactionRef,
-        });
+      if (isTestMode()) {
+        try {
+          const store = getStore();
+          store.recordPayment(invoiceId, parseFloat(amount), paymentMethod || 'UPI', transactionRef, note);
+        } catch { /* test store mirror */ }
       }
-    } catch {
-      // Non-blocking in isolated unit tests
-    }
 
-    if (result.isDuplicate) {
       return NextResponse.json({
         success: true,
-        status: 'ALREADY_PROCESSED',
-        message: `Transaction ${transactionRef} was already processed. Duplicate ignored safely.`,
-        payment: result.payment,
+        status: result.isDuplicate ? 'ALREADY_PROCESSED' : 'PROCESSED',
+        message: result.isDuplicate ? `Transaction ${transactionRef} was already processed.` : 'Payment recorded successfully',
+        transactionRef,
+        newOutstandingAmount: result.newOutstandingAmount,
+        newStatus: result.newStatus,
       });
     }
 
-    return NextResponse.json({
-      success: true,
-      status: 'PROCESSED',
-      payment: result.payment,
-    });
+    if (isTestMode()) {
+      const store = getStore();
+      const result = store.recordPayment(invoiceId, parseFloat(amount), paymentMethod || 'UPI', transactionRef, note);
+      if (result) {
+        return NextResponse.json({
+          success: true,
+          status: result.isDuplicate ? 'ALREADY_PROCESSED' : 'PROCESSED',
+          message: result.isDuplicate ? `Transaction ${transactionRef} was already processed.` : 'Payment recorded successfully',
+          payment: result.payment,
+        });
+      }
+    }
+
+    return NextResponse.json({ success: false, error: 'Invoice not found in database' }, { status: 404 });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Webhook error';
     return NextResponse.json({ success: false, error: message }, { status: 500 });

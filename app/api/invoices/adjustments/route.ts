@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticateRequest } from '@/lib/api-auth';
-import { query } from '@/lib/db';
+import { query, transaction } from '@/lib/db';
 import { recalculateInvoice } from '@/lib/services/billing.service';
 
 export async function POST(req: NextRequest) {
@@ -21,31 +21,35 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'type must be CREDIT or DEBIT.' }, { status: 400 });
     }
 
-    const adjId = `adj_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    // NOTE: invoice_adjustments.id and invoice_items.id are uuid() — prefixed
+    // seed ids are rejected by Postgres, and the multi-statement write must
+    // run on a single connection (transaction helper), not pooled one-offs.
     const adjAmount = Math.abs(amount);
 
-    await query('BEGIN');
-    await query(
-      `INSERT INTO invoice_adjustments (id, invoice_id, type, amount, reason, authorized_by, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
-      [adjId, invoiceId, type, adjAmount, reason, auth.user.name || auth.user.userId]
-    );
+    const adjRes = await transaction(async (client) => {
+      const adj = await client.query<{ id: string }>(
+        `INSERT INTO invoice_adjustments (id, invoice_id, type, amount, reason, authorized_by, created_at)
+         VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, NOW())
+         RETURNING id`,
+        [invoiceId, type, adjAmount, reason, auth.user.name || auth.user.userId]
+      );
 
-    // Also add itemized line in invoice_items for transparency
-    const itemAmount = type === 'CREDIT' ? -adjAmount : adjAmount;
-    await query(
-      `INSERT INTO invoice_items (id, invoice_id, date, description, quantity, rate, amount)
-       VALUES ($1, $2, $3, $4, 1.0, $5, $6)`,
-      [
-        `item_${adjId}`,
-        invoiceId,
-        new Date().toISOString().slice(0, 10),
-        `Adjustment (${type}): ${reason}`,
-        itemAmount,
-        itemAmount,
-      ]
-    );
-    await query('COMMIT');
+      // Also add itemized line in invoice_items for transparency
+      const itemAmount = type === 'CREDIT' ? -adjAmount : adjAmount;
+      await client.query(
+        `INSERT INTO invoice_items (id, invoice_id, date, description, quantity, rate, amount)
+         VALUES (gen_random_uuid(), $1, $2, $3, 1.0, $4, $5)`,
+        [
+          invoiceId,
+          new Date().toISOString().slice(0, 10),
+          `Adjustment (${type}): ${reason}`,
+          itemAmount,
+          itemAmount,
+        ]
+      );
+      return adj.rows[0].id as string;
+    });
+    const adjId = adjRes;
 
     // Authoritative recalculation of invoice
     const updatedInvoice = await recalculateInvoice(invoiceId);
@@ -57,7 +61,6 @@ export async function POST(req: NextRequest) {
       updatedInvoice,
     });
   } catch (err: unknown) {
-    await query('ROLLBACK').catch(() => {});
     const message = err instanceof Error ? err.message : 'Failed to apply invoice adjustment';
     return NextResponse.json({ success: false, error: message }, { status: 500 });
   }

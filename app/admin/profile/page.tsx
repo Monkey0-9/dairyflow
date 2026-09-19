@@ -115,14 +115,29 @@ export default function AdminProfilePage() {
           address,
         }),
       });
-      const data = await res.json();
-      if (data.success) {
-        setStatusMessage({ type: 'success', text: 'Profile details successfully saved to PostgreSQL database.' });
-      } else {
-        setStatusMessage({ type: 'error', text: data.error || 'Failed to update profile' });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) {
+        setStatusMessage({ type: 'error', text: data?.error || `Failed to update profile (${res.status}). Nothing was saved.` });
+        return;
       }
+      // Refresh from the server so the header shows what was actually saved.
+      try {
+        const reRes = await fetch('/api/admin/profile');
+        const reData = await reRes.json().catch(() => null);
+        if (reRes.ok && reData?.success && reData.profile) {
+          setProfile(reData.profile);
+          setName(reData.profile.name || '');
+          setPhone(reData.profile.phone || '');
+          setBusinessName(reData.profile.businessName || '');
+          setUpiId(reData.profile.upiId || '');
+          setAddress(reData.profile.address || '');
+        }
+      } catch {
+        // Keep the success banner; a reload will show persisted values.
+      }
+      setStatusMessage({ type: 'success', text: 'Profile details successfully saved to PostgreSQL database.' });
     } catch {
-      setStatusMessage({ type: 'error', text: 'Network failure while persisting profile' });
+      setStatusMessage({ type: 'error', text: 'Network failure while persisting profile. Nothing was saved.' });
     } finally {
       setSaving(false);
     }

@@ -36,7 +36,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // DB-first path: INSERT INTO pause_requests via request.service
+    // DB-first path: INSERT INTO pause_requests via request.service.
+    // Production: the database is the source of truth — a store-only
+    // fallback "success" would vanish on restart, so failures are loud.
+    let dbWriteFailed: unknown = null;
     if (!isUnitTest()) {
       try {
         const store = getStore();
@@ -72,8 +75,16 @@ export async function POST(req: NextRequest) {
           }
         }
       } catch (err) {
-        console.warn('[pause-request] DB insert failed, falling back to store:', err);
+        dbWriteFailed = err;
+        console.error('[pause-request] DB insert failed:', err);
       }
+    }
+
+    // Production: the DB write failed, so there is nothing durable to save
+    // into. Report honestly instead of a fake 201 that is lost immediately.
+    if (!isUnitTest() && dbWriteFailed) {
+      const message = dbWriteFailed instanceof Error ? dbWriteFailed.message : 'Request could not be saved. Please retry.';
+      return NextResponse.json({ success: false, error: message }, { status: 503 });
     }
 
     const store = getStore();

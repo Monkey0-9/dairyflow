@@ -14,7 +14,7 @@ export async function POST(req: NextRequest) {
 
     const targetCustomerId = body.customerId || session?.customerId;
 
-    const { date, requestedQuantity, quantity, reason, milkType, notes } = body;
+    const { date, endDate, requestedQuantity, quantity, reason, milkType, notes } = body;
     const qtyRaw = requestedQuantity ?? quantity;
 
     if (!date || qtyRaw === undefined || qtyRaw === null) {
@@ -32,7 +32,25 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // DB-first path
+    // A date range (extraEnd in the portal) expands to one durable request
+    // per day so no selected day is silently dropped.
+    const dates: string[] = [date];
+    if (endDate && typeof endDate === 'string' && endDate > date) {
+      const cursor = new Date(date + 'T00:00:00');
+      const end = new Date(endDate + 'T00:00:00');
+      let guard = 0;
+      while (cursor < end && guard < 30) {
+        cursor.setDate(cursor.getDate() + 1);
+        guard += 1;
+        dates.push(cursor.toISOString().slice(0, 10));
+      }
+      if (endDate < dates[dates.length - 1]) {
+        return NextResponse.json({ success: false, error: 'Date range is too large (max 31 days).' }, { status: 400 });
+      }
+    }
+
+    // DB-first path. Production: failures are loud (503), never a fake 201.
+    let dbWriteFailed: unknown = null;
     if (!isUnitTest()) {
       try {
         const store = getStore();
@@ -43,35 +61,52 @@ export async function POST(req: NextRequest) {
           : undefined;
         const customerId = targetCustomerId || fallbackCust?.id;
         if (customerId) {
-          const dbResult = await createExtraMilkRequest({
-            customerId,
-            farmerId: fallbackCust?.farmerId,
-            tenantId: session?.tenantId || fallbackCust?.tenantId,
-            date,
-            milkType: milkType || 'Cow',
-            quantity: qty,
-            notes: notes || reason || 'Extra milk requested by customer',
-          });
-          if (dbResult.success) {
-            publishEvent({
-              type: 'request:created',
-              tenantId: session?.tenantId,
-              farmerId: fallbackCust?.farmerId,
+          const created: { id: string; date: string }[] = [];
+          for (const d of dates) {
+            const dbResult = await createExtraMilkRequest({
               customerId,
-              payload: { requestId: dbResult.id, kind: 'EXTRA_MILK', date, quantity: qty },
+              farmerId: fallbackCust?.farmerId,
+              tenantId: session?.tenantId || fallbackCust?.tenantId,
+              date: d,
+              milkType: milkType || 'Cow',
+              quantity: qty,
+              notes: notes || reason || 'Extra milk requested by customer',
             });
-            return NextResponse.json(
-              { success: true, request: { id: dbResult.id, customerId, date, quantity: qty, status: 'PENDING' }, source: 'db' },
-              { status: 201 }
-            );
+            if (!dbResult.success || !dbResult.id) {
+              if (dbResult.error === 'Customer not found') {
+                return NextResponse.json({ success: false, error: 'Customer not found or unauthorized' }, { status: 404 });
+              }
+              throw new Error(dbResult.error || `Failed to save extra milk request for ${d}`);
+            }
+            created.push({ id: dbResult.id, date: d });
           }
-          if (dbResult.error !== 'Customer not found') {
-            throw new Error(dbResult.error);
-          }
+          publishEvent({
+            type: 'request:created',
+            tenantId: session?.tenantId,
+            farmerId: fallbackCust?.farmerId,
+            customerId,
+            payload: { requestIds: created.map((c) => c.id), kind: 'EXTRA_MILK', dates, quantity: qty },
+          });
+          return NextResponse.json(
+            {
+              success: true,
+              request: { id: created[0].id, customerId, date, quantity: qty, status: 'PENDING' },
+              requests: created.map((c) => ({ id: c.id, customerId, date: c.date, quantity: qty, status: 'PENDING' })),
+              source: 'db',
+            },
+            { status: 201 }
+          );
         }
       } catch (err) {
-        console.warn('[milk-request] DB insert failed, falling back to store:', err);
+        dbWriteFailed = err;
+        console.error('[milk-request] DB insert failed:', err);
       }
+    }
+
+    // Production: the DB write failed — report honestly.
+    if (!isUnitTest() && dbWriteFailed) {
+      const message = dbWriteFailed instanceof Error ? dbWriteFailed.message : 'Request could not be saved. Please retry.';
+      return NextResponse.json({ success: false, error: message }, { status: 503 });
     }
 
     const store = getStore();

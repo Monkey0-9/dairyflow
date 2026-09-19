@@ -211,8 +211,8 @@ export class MilkFlowStore {
       {
         id: 'user_prakash',
         tenantId: this.tenantId,
-        name: 'Prakash Paraveen (Admin)',
-        email: 'prakashparaveen046@gmail.com',
+        name: 'Estate Administrator',
+        email: 'admin@milkflow.in',
         phone: '+91 98765 43210',
         role: 'FARMER',
       },
@@ -782,7 +782,7 @@ export class MilkFlowStore {
         tenantId: this.tenantId,
         userId: 'user_farmer',
         title: '⚠ Delivery Dispute Raised',
-        message: 'Anand Verma reported they did not receive milk today (16 Sep). Recorded: 2L.',
+        message: 'Anand Verma reported they did not receive milk today. Recorded: 2L.',
         type: 'DISPUTE',
         read: false,
         timestamp: '2026-09-16T08:35:00Z',
@@ -794,22 +794,22 @@ export class MilkFlowStore {
         title: '🌴 Vacation Pause Scheduled',
         message: 'Priya Sharma scheduled vacation pause from Sept 20 to Sept 25 (6 days).',
         type: 'SYSTEM',
-        read: false,
-        timestamp: '2026-09-14T10:05:00Z',
+        read: true,
+        timestamp: '2026-09-15T18:00:00Z',
       },
       {
         id: 'notif_03',
         tenantId: this.tenantId,
-        userId: 'user_ravi',
-        title: '🥛 Milk Delivered — 1.0 L',
-        message: 'Fresh Cow Milk 1.0 L delivered successfully at 06:30 AM.',
-        type: 'DELIVERY',
+        userId: 'user_farmer',
+        title: '✨ Extra Milk Requested',
+        message: 'Ravi Kumar requested +1.0 L Cow Milk for tomorrow morning.',
+        type: 'SYSTEM',
         read: true,
-        timestamp: '2026-09-16T06:32:00Z',
+        timestamp: '2026-09-15T16:20:00Z',
       },
     ];
 
-    // 15. Initial Daily Inventory for 16 Sep (Morning yield: 85 L)
+    // 15. Initial Daily Inventory (Morning yield: 85 L)
     this.inventoryReconciliations.set('2026-09-16', {
       date: '2026-09-16',
       tenantId: this.tenantId,

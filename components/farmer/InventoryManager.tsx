@@ -34,18 +34,21 @@ export default function InventoryManager({
   const [dayLockStatus, setDayLockStatus] = useState<string>('OPEN');
   const [showClosingModal, setShowClosingModal] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const fetchInventory = async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const res = await fetch(`/api/inventory?date=${selectedDate}`);
-      const data = await res.json();
-      if (data.success) {
-        setReconciliation(data.reconciliation);
-        setDayLockStatus(data.dayLockStatus);
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || `Failed to load inventory (${res.status}).`);
       }
+      setReconciliation(data.reconciliation);
+      setDayLockStatus(data.dayLockStatus);
     } catch (err) {
-      console.error(err);
+      setLoadError(err instanceof Error ? err.message : 'Failed to load inventory.');
     } finally {
       setLoading(false);
     }
@@ -55,6 +58,8 @@ export default function InventoryManager({
     fetchInventory();
   }, [selectedDate]);
 
+  // Throws with the server message on failure so the closing modal stays
+  // open instead of pretending the day was locked.
   const handleConfirmCloseDay = async (formData: any) => {
     const res = await fetch('/api/inventory', {
       method: 'POST',
@@ -64,15 +69,29 @@ export default function InventoryManager({
         ...formData,
       }),
     });
-    const data = await res.json();
-    if (data.success) {
-      setReconciliation(data.reconciliation);
-      setDayLockStatus('FINALIZED');
-      onRefresh();
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data?.success) {
+      throw new Error(data?.error || `Day closing failed (${res.status}). Nothing was locked.`);
     }
+    setReconciliation(data.reconciliation);
+    setDayLockStatus(data.dayLockStatus || 'FINALIZED');
+    await onRefresh();
   };
 
   if (loading || !reconciliation) {
+    if (loadError) {
+      return (
+        <div className="p-12 text-center text-xs">
+          <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-red-800" role="alert">
+            <p className="font-bold">Could not load inventory.</p>
+            <p className="mt-0.5">{loadError}</p>
+            <button onClick={fetchInventory} className="mt-2 rounded-xl bg-red-600 px-4 py-2 font-bold text-white">
+              Retry
+            </button>
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="p-12 text-center text-slate-500 text-xs">
         <Droplets className="w-8 h-8 text-emerald-600 animate-spin mx-auto mb-2" />

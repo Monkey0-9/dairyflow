@@ -108,7 +108,10 @@ export async function generateMonthlyInvoice(params: {
 
     let totalQuantity = 0;
     let totalAmount = 0;
-    const invoiceId = `INV_${params.customerId}_${params.year}_${params.month}`;
+    // NOTE: invoices.id is uuid() — prefixed seed ids are rejected by
+    // Postgres, which made every invoice generation fail.
+    const idRes = await client.query(`SELECT gen_random_uuid() as id`);
+    const invoiceId = idRes.rows[0].id as string;
     const dueDate = new Date(params.year, params.month, 5); // 5th of next month
 
     for (const d of delRes.rows) {
@@ -126,11 +129,10 @@ export async function generateMonthlyInvoice(params: {
     // 3. Populate itemized invoice items
     for (const d of delRes.rows) {
       const lineAmt = d.qty * d.price;
-      const itemId = `ITEM_${d.id}_${Date.now()}`;
       await client.query(
         `INSERT INTO invoice_items (id, invoice_id, date, description, quantity, rate, amount)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [itemId, invoiceId, d.date, `Daily milk delivery on ${d.date}`, d.qty, d.price, lineAmt]
+         VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6)`,
+        [invoiceId, d.date, `Daily milk delivery on ${d.date}`, d.qty, d.price, lineAmt]
       );
     }
 

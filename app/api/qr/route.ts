@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser } from '@/lib/auth';
+import { query } from '@/lib/db';
+import { isTestMode } from '@/lib/db-scope';
 import {
   lookupQrToken,
   confirmDeliveryViaQrScan,
@@ -74,7 +76,7 @@ export async function POST(req: NextRequest) {
 
       const confirmRes = await confirmDeliveryViaQrScan({
         token,
-        farmerId: user.farmerId || 'F001',
+        farmerId: await resolveScanFarmerId(user),
         tenantId: user.tenantId,
         date,
         quantity: typeof quantity === 'number' ? quantity : undefined,
@@ -154,4 +156,29 @@ export async function POST(req: NextRequest) {
     const message = err instanceof Error ? err.message : 'Internal server error';
     return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
+}
+
+// Seed ids (F001) never exist in PostgreSQL: resolve the farmer's real
+// profile id from the database so QR scans actually confirm deliveries.
+// Test suites use seed sessions + the in-memory store, so legacy behavior
+// is preserved there.
+async function resolveScanFarmerId(user: { userId: string; farmerId?: string; tenantId: string }): Promise<string> {
+  if (isTestMode()) return user.farmerId || 'F001';
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (user.farmerId && UUID_RE.test(user.farmerId)) {
+    try {
+      const r = await query(`SELECT id FROM farmer_profiles WHERE id = $1`, [user.farmerId]);
+      if (r.rows.length > 0) return user.farmerId;
+    } catch { /* fall through */ }
+  }
+  try {
+    const byUser = await query(`SELECT id FROM farmer_profiles WHERE user_id = $1`, [user.userId]);
+    if (byUser.rows.length > 0) return byUser.rows[0].id as string;
+    const byTenant = await query(
+      `SELECT id FROM farmer_profiles WHERE tenant_id = $1 ORDER BY created_at ASC LIMIT 1`,
+      [user.tenantId]
+    );
+    if (byTenant.rows.length > 0) return byTenant.rows[0].id as string;
+  } catch { /* fall through */ }
+  return user.farmerId || '';
 }

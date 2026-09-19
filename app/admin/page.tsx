@@ -29,6 +29,7 @@ import AuditTrailViewer from '@/components/farmer/AuditTrailViewer';
 import DeliveryRouteView from '@/components/farmer/DeliveryRouteView';
 import InventoryManager from '@/components/farmer/InventoryManager';
 import CustomerRequestsManager from '@/components/farmer/CustomerRequestsManager';
+import { BottomNav } from '@/components/ui/BottomNav';
 import {
   Droplets,
   AlertTriangle,
@@ -36,16 +37,13 @@ import {
   CheckCircle2,
   Calendar,
   Sparkles,
-  TrendingUp,
   RefreshCw,
   LogOut,
   Layers,
   FileText,
   UserCheck,
   Truck,
-  PlusCircle,
   User,
-  XCircle,
 } from 'lucide-react';
 
 export default function AdminPage() {
@@ -66,6 +64,42 @@ export default function AdminPage() {
   const [operationalStats, setOperationalStats] = useState<AdminOperationalStats | null>(null);
   const [monthToDate, setMonthToDate] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  // Shared mutation helper: parses the API result and THROWS with the server
+  // message when a save fails, so child modals stay open and the error banner
+  // explains what happened instead of a silent false success.
+  const apiMutate = async (path: string, options?: RequestInit) => {
+    let res: Response;
+    try {
+      res = await fetch(path, options);
+    } catch {
+      throw new Error('Network failure. Check your connection and retry.');
+    }
+    let data: any = null;
+    try {
+      data = await res.json();
+    } catch {
+      throw new Error(`Server error (${res.status}). Please retry.`);
+    }
+    if (!res.ok || !data?.success) {
+      throw new Error(data?.error || `Request failed (${res.status}).`);
+    }
+    return data;
+  };
+
+  const runSave = async <T,>(fn: () => Promise<T>): Promise<T> => {
+    try {
+      const out = await fn();
+      setSaveError(null);
+      await loadAdminData();
+      return out;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Save failed. Please retry.';
+      setSaveError(message);
+      throw err;
+    }
+  };
 
   // Load all admin data
   const loadAdminData = useCallback(async () => {
@@ -151,75 +185,48 @@ export default function AdminPage() {
       bottlesReturned?: number;
     }
   ) => {
-    try {
-      const res = await fetch('/api/ledger', {
+    return runSave(() =>
+      apiMutate('/api/ledger', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           recordId,
           ...updates,
-          changedBy: 'Suresh Patel (Farmer)',
         }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        loadAdminData();
-      }
-    } catch (err) {
-      console.error(err);
-    }
+      })
+    );
   };
 
   // Add customer
   const handleAddCustomer = async (formData: any) => {
-    const res = await fetch('/api/customers', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(formData),
-    });
-    const data = await res.json();
-    if (data.success) {
-      loadAdminData();
-    }
-    return data;
+    return runSave(() =>
+      apiMutate('/api/customers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(formData),
+      })
+    );
   };
 
   // Delete customer
   const handleDeleteCustomer = async (customerId: string) => {
-    const res = await fetch(`/api/customers?id=${customerId}`, {
-      method: 'DELETE',
-    });
-    const data = await res.json();
-    if (data.success) {
-      loadAdminData();
-    }
-    return data;
+    return runSave(() =>
+      apiMutate(`/api/customers?id=${customerId}`, {
+        method: 'DELETE',
+      })
+    );
   };
 
-  // Approve pending customer
-  const handleApproveCustomer = async (customerId: string) => {
-    const res = await fetch('/api/customers', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ customerId, action: 'APPROVE' }),
-    });
-    const data = await res.json();
-    if (data.success) {
-      loadAdminData();
-    }
-  };
 
   // Review extra milk request
   const handleReviewExtraRequest = async (requestId: string, action: 'APPROVED' | 'REJECTED') => {
-    const res = await fetch(`/api/farmer/requests/${requestId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'MILK', action, reviewedBy: 'Suresh Patel (Farmer)' }),
-    });
-    const data = await res.json();
-    if (data.success) {
-      loadAdminData();
-    }
+    return runSave(() =>
+      apiMutate(`/api/farmer/requests/${requestId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'MILK', action }),
+      })
+    );
   };
 
   // Review pause request
@@ -228,20 +235,17 @@ export default function AdminPage() {
     action: 'APPROVED' | 'REJECTED',
     reason?: string
   ) => {
-    const res = await fetch(`/api/farmer/requests/${requestId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        type: 'PAUSE',
-        action,
-        rejectionReason: reason,
-        reviewedBy: 'Suresh Patel (Farmer)',
-      }),
-    });
-    const data = await res.json();
-    if (data.success) {
-      loadAdminData();
-    }
+    return runSave(() =>
+      apiMutate(`/api/farmer/requests/${requestId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'PAUSE',
+          action,
+          rejectionReason: reason,
+        }),
+      })
+    );
   };
 
   // Review milk request with note
@@ -250,20 +254,17 @@ export default function AdminPage() {
     action: 'APPROVED' | 'REJECTED',
     reason?: string
   ) => {
-    const res = await fetch(`/api/farmer/requests/${requestId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        type: 'MILK',
-        action,
-        note: reason,
-        reviewedBy: 'Suresh Patel (Farmer)',
-      }),
-    });
-    const data = await res.json();
-    if (data.success) {
-      loadAdminData();
-    }
+    return runSave(() =>
+      apiMutate(`/api/farmer/requests/${requestId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'MILK',
+          action,
+          note: reason,
+        }),
+      })
+    );
   };
 
   // Resolve dispute
@@ -273,20 +274,18 @@ export default function AdminPage() {
     customQty?: number,
     note?: string
   ) => {
-    const res = await fetch('/api/disputes', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        disputeId,
-        action,
-        customQuantity: customQty,
-        farmerNote: note,
-      }),
-    });
-    const data = await res.json();
-    if (data.success) {
-      loadAdminData();
-    }
+    return runSave(() =>
+      apiMutate('/api/disputes', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          disputeId,
+          action,
+          customQuantity: customQty,
+          farmerNote: note,
+        }),
+      })
+    );
   };
 
   // Record Offline Payment
@@ -296,52 +295,66 @@ export default function AdminPage() {
     paymentMethod: PaymentMethod,
     note?: string
   ) => {
-    const res = await fetch('/api/payments', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        invoiceId,
-        amount,
-        paymentMethod,
-        note,
-      }),
-    });
-    const data = await res.json();
-    if (data.success) {
-      loadAdminData();
-    }
+    return runSave(() =>
+      apiMutate('/api/payments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          invoiceId,
+          amount,
+          paymentMethod,
+          note,
+        }),
+      })
+    );
   };
 
   // Recalculate invoices
   const handleRecalculateInvoices = async () => {
-    const res = await fetch('/api/invoices', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ month: 9, year: 2026 }),
-    });
-    const data = await res.json();
-    if (data.success) {
-      loadAdminData();
-    }
+    const target = new Date(selectedDate || Date.now());
+    const targetMonth = target.getMonth() + 1;
+    const targetYear = target.getFullYear();
+    return runSave(() =>
+      apiMutate('/api/invoices', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ month: targetMonth, year: targetYear }),
+      })
+    );
   };
 
   // Mark notification read
   const handleMarkNotificationRead = async (id: string) => {
-    await fetch('/api/notifications', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ notificationId: id }),
-    });
-    loadAdminData();
+    try {
+      await apiMutate('/api/notifications', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notificationId: id }),
+      });
+      setSaveError(null);
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Failed to update notification.');
+    }
+    await loadAdminData();
   };
 
   // Persona switcher handler
   const handlePersonaChange = async (_role: string, userId: string) => {
-    await fetch('/api/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ demoUserId: userId }),
-    });
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ demoUserId: userId }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || (data && data.success === false)) {
+        throw new Error(data?.error || `Persona switch failed (${res.status}).`);
+      }
+      setSaveError(null);
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Persona switch failed.');
+      return;
+    }
     if (userId === 'user_admin') router.push('/superadmin');
     else if (userId.startsWith('user_')) router.push('/customer');
     else router.push('/admin');
@@ -366,7 +379,7 @@ export default function AdminPage() {
         <div className="w-12 h-12 rounded-2xl bg-emerald-600 text-white flex items-center justify-center animate-bounce shadow-lg shadow-emerald-500/20 mb-3">
           <Droplets className="w-7 h-7" />
         </div>
-        <h2 className="text-lg font-black text-slate-900">GreenValley Dairy Admin Command Center</h2>
+        <h2 className="text-lg font-black text-slate-900">MilkFlow Private Reserve Admin Command Center</h2>
         <p className="text-xs text-slate-500 mt-1">Calculating real delivery ledger & revenue analytics...</p>
       </div>
     );
@@ -397,6 +410,24 @@ export default function AdminPage() {
 
   return (
     <div className="min-h-screen bg-slate-50/70 text-slate-900 flex flex-col">
+      {/* Save-error banner: every failed mutation surfaces here with the
+          server message instead of failing silently. */}
+      {saveError && (
+        <div className="mx-4 mt-3 flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 shadow-sm" role="alert">
+          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+          <div className="flex-1">
+            <p className="font-bold">Save failed — your change was NOT saved.</p>
+            <p className="mt-0.5">{saveError}</p>
+          </div>
+          <button
+            onClick={() => setSaveError(null)}
+            className="rounded-lg px-2 py-1 text-xs font-bold hover:bg-red-100"
+            aria-label="Dismiss error"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
       {/* Top Navbar */}
       <Navbar
         currentRole="FARMER"
@@ -425,7 +456,7 @@ export default function AdminPage() {
                 </span>
               </div>
               <h1 className="text-2xl font-black tracking-tight flex items-center gap-2">
-                <span>GreenValley Dairy Farm</span>
+                <span>MilkFlow Private Reserve</span>
                 <span className="text-xs bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 px-2.5 py-0.5 rounded-full font-bold">
                   {selectedDate === new Date().toISOString().split('T')[0] ? `Today (${new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })})` : selectedDate}
                 </span>
@@ -647,9 +678,9 @@ export default function AdminPage() {
         </div>
 
         {/* Main Content Layout with Left Component and Right Live Activity Feed */}
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 items-start">
-          {/* Main Active Tab Workspace (3 Columns) */}
-          <div className="lg:col-span-3 space-y-6">
+        <div className="grid grid-cols-1 xl:grid-cols-4 gap-6 items-start">
+          {/* Main Active Tab Workspace (3 Columns on desktop) */}
+          <div className="xl:col-span-3 space-y-6">
             {activeTab === 'daily' && (
               <FarmerDashboard
                 selectedDate={selectedDate}
@@ -740,6 +771,7 @@ export default function AdminPage() {
               <DeliveryRouteView
                 customers={customers}
                 records={records}
+                onRefresh={loadAdminData}
                 onQuickDeliver={(r) =>
                   handleUpdateRecord(r.id, {
                     deliveredQuantity: r.scheduledQuantity,
@@ -755,11 +787,85 @@ export default function AdminPage() {
                 }
               />
             )}
+
+            {activeTab === 'more' && (
+              <div className="space-y-6">
+                <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-xs">
+                  <h3 className="text-base font-black text-slate-900 tracking-tight">Secondary Dairy Tools</h3>
+                  <p className="text-xs text-slate-500 mt-1">Select a management tool:</p>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mt-4">
+                    <button
+                      onClick={() => setActiveTab('pricing')}
+                      className="p-4 rounded-2xl border border-slate-200 bg-slate-50 hover:bg-white text-left transition cursor-pointer hover:border-emerald-300 shadow-2xs"
+                    >
+                      <Droplets className="w-5 h-5 text-emerald-600 mb-2" />
+                      <div className="font-extrabold text-xs text-slate-900">Product Pricing</div>
+                      <span className="text-[11px] text-slate-500">Milk rates &amp; catalog</span>
+                    </button>
+
+                    <button
+                      onClick={() => setActiveTab('routes')}
+                      className="p-4 rounded-2xl border border-slate-200 bg-slate-50 hover:bg-white text-left transition cursor-pointer hover:border-emerald-300 shadow-2xs"
+                    >
+                      <Truck className="w-5 h-5 text-emerald-600 mb-2" />
+                      <div className="font-extrabold text-xs text-slate-900">Delivery Routes</div>
+                      <span className="text-[11px] text-slate-500">Stop sequencing</span>
+                    </button>
+
+                    <button
+                      onClick={() => setActiveTab('calendar')}
+                      className="p-4 rounded-2xl border border-slate-200 bg-slate-50 hover:bg-white text-left transition cursor-pointer hover:border-emerald-300 shadow-2xs"
+                    >
+                      <Calendar className="w-5 h-5 text-emerald-600 mb-2" />
+                      <div className="font-extrabold text-xs text-slate-900">Monthly Calendar</div>
+                      <span className="text-[11px] text-slate-500">Past ledger days</span>
+                    </button>
+
+                    <button
+                      onClick={() => setActiveTab('inventory')}
+                      className="p-4 rounded-2xl border border-slate-200 bg-slate-50 hover:bg-white text-left transition cursor-pointer hover:border-emerald-300 shadow-2xs"
+                    >
+                      <Layers className="w-5 h-5 text-emerald-600 mb-2" />
+                      <div className="font-extrabold text-xs text-slate-900">Inventory Balance</div>
+                      <span className="text-[11px] text-slate-500">Milk yield vs volume</span>
+                    </button>
+
+                    <button
+                      onClick={() => setActiveTab('disputes')}
+                      className="p-4 rounded-2xl border border-slate-200 bg-slate-50 hover:bg-white text-left transition cursor-pointer hover:border-emerald-300 shadow-2xs"
+                    >
+                      <AlertTriangle className="w-5 h-5 text-amber-500 mb-2" />
+                      <div className="font-extrabold text-xs text-slate-900">Customer Disputes</div>
+                      <span className="text-[11px] text-slate-500">{disputes.length} active</span>
+                    </button>
+
+                    <button
+                      onClick={() => setActiveTab('forecast')}
+                      className="p-4 rounded-2xl border border-slate-200 bg-slate-50 hover:bg-white text-left transition cursor-pointer hover:border-emerald-300 shadow-2xs"
+                    >
+                      <Sparkles className="w-5 h-5 text-purple-600 mb-2" />
+                      <div className="font-extrabold text-xs text-slate-900">Demand Forecast</div>
+                      <span className="text-[11px] text-slate-500">AI order projections</span>
+                    </button>
+
+                    <button
+                      onClick={() => setActiveTab('audit')}
+                      className="p-4 rounded-2xl border border-slate-200 bg-slate-50 hover:bg-white text-left transition cursor-pointer hover:border-emerald-300 shadow-2xs"
+                    >
+                      <CheckCircle2 className="w-5 h-5 text-emerald-600 mb-2" />
+                      <div className="font-extrabold text-xs text-slate-900">Audit Trail</div>
+                      <span className="text-[11px] text-slate-500">Cryptographic log</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Right Live Activity Feed Sidebar (1 Column) */}
           <div className="space-y-4">
-            <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-xs space-y-3">
+            <div className="bg-white p-4.5 rounded-2xl border border-slate-200/90 shadow-xs space-y-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <Clock className="w-4 h-4 text-emerald-600" />
@@ -767,7 +873,7 @@ export default function AdminPage() {
                     Live Activity Stream
                   </h3>
                 </div>
-                <span className="text-[10px] font-mono text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full font-bold">
+                <span className="text-[10px] font-mono text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full font-bold border border-emerald-200/60">
                   Real-Time
                 </span>
               </div>
@@ -792,39 +898,91 @@ export default function AdminPage() {
               </div>
             </div>
 
-            {/* Quick Actions Card */}
-            <div className="bg-slate-900 text-white p-5 rounded-3xl shadow-xs space-y-3">
-              <h4 className="text-xs font-extrabold uppercase tracking-wider text-emerald-400">
-                Quick Farmer Shortcuts
-              </h4>
+            {/* Quick Farmer Shortcuts - Obsidian Enterprise Command Dock */}
+            <div className="bg-gradient-to-b from-slate-900 via-slate-900 to-slate-950 text-white p-4.5 rounded-2xl border border-slate-800/80 shadow-md space-y-3">
+              <div className="flex items-center justify-between border-b border-slate-800/70 pb-2.5">
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                  <h4 className="text-[11px] font-mono font-bold uppercase tracking-wider text-emerald-400">
+                    Farmer Shortcuts
+                  </h4>
+                </div>
+                <span className="text-[10px] font-mono text-slate-400 bg-slate-800/80 px-2 py-0.5 rounded-md border border-slate-700/60">
+                  Command Dock
+                </span>
+              </div>
+
               <div className="space-y-1.5 text-xs">
                 <button
                   onClick={() => setActiveTab('daily')}
-                  className="w-full text-left p-2.5 rounded-xl hover:bg-white/10 transition flex items-center justify-between cursor-pointer"
+                  className="w-full text-left p-2.5 rounded-xl bg-slate-800/40 hover:bg-slate-800/90 hover:border-slate-700 border border-slate-800/60 transition flex items-center justify-between group cursor-pointer"
                 >
-                  <span>Start Morning Delivery Run</span>
-                  <Truck className="w-3.5 h-3.5 text-emerald-400" />
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 group-hover:bg-emerald-500/20 transition shrink-0">
+                      <Truck className="w-3.5 h-3.5" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="font-semibold text-slate-200 group-hover:text-white text-xs truncate">Start Morning Run</div>
+                      <div className="text-[10px] text-slate-400 truncate">Daily delivery checklist</div>
+                    </div>
+                  </div>
+                  <kbd className="font-mono text-[10px] text-slate-400 group-hover:text-slate-200 bg-slate-900/80 px-1.5 py-0.5 rounded border border-slate-800 shrink-0 ml-2">
+                    ⌥1
+                  </kbd>
                 </button>
+
                 <button
                   onClick={() => setActiveTab('inventory')}
-                  className="w-full text-left p-2.5 rounded-xl hover:bg-white/10 transition flex items-center justify-between cursor-pointer"
+                  className="w-full text-left p-2.5 rounded-xl bg-slate-800/40 hover:bg-slate-800/90 hover:border-slate-700 border border-slate-800/60 transition flex items-center justify-between group cursor-pointer"
                 >
-                  <span>Close Day & Reconcile Milk</span>
-                  <Layers className="w-3.5 h-3.5 text-emerald-400" />
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="p-1.5 rounded-lg bg-teal-500/10 text-teal-400 border border-teal-500/20 group-hover:bg-teal-500/20 transition shrink-0">
+                      <Layers className="w-3.5 h-3.5" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="font-semibold text-slate-200 group-hover:text-white text-xs truncate">Close & Reconcile</div>
+                      <div className="text-[10px] text-slate-400 truncate">Silo balance verification</div>
+                    </div>
+                  </div>
+                  <kbd className="font-mono text-[10px] text-slate-400 group-hover:text-slate-200 bg-slate-900/80 px-1.5 py-0.5 rounded border border-slate-800 shrink-0 ml-2">
+                    ⌥2
+                  </kbd>
                 </button>
+
                 <button
                   onClick={() => setActiveTab('billing')}
-                  className="w-full text-left p-2.5 rounded-xl hover:bg-white/10 transition flex items-center justify-between cursor-pointer"
+                  className="w-full text-left p-2.5 rounded-xl bg-slate-800/40 hover:bg-slate-800/90 hover:border-slate-700 border border-slate-800/60 transition flex items-center justify-between group cursor-pointer"
                 >
-                  <span>Generate September Invoices</span>
-                  <FileText className="w-3.5 h-3.5 text-emerald-400" />
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="p-1.5 rounded-lg bg-blue-500/10 text-blue-400 border border-blue-500/20 group-hover:bg-blue-500/20 transition shrink-0">
+                      <FileText className="w-3.5 h-3.5" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="font-semibold text-slate-200 group-hover:text-white text-xs truncate">Monthly Invoices</div>
+                      <div className="text-[10px] text-slate-400 truncate">Automated billing ledger</div>
+                    </div>
+                  </div>
+                  <kbd className="font-mono text-[10px] text-slate-400 group-hover:text-slate-200 bg-slate-900/80 px-1.5 py-0.5 rounded border border-slate-800 shrink-0 ml-2">
+                    ⌥3
+                  </kbd>
                 </button>
+
                 <button
                   onClick={() => setActiveTab('audit')}
-                  className="w-full text-left p-2.5 rounded-xl hover:bg-white/10 transition flex items-center justify-between cursor-pointer"
+                  className="w-full text-left p-2.5 rounded-xl bg-slate-800/40 hover:bg-slate-800/90 hover:border-slate-700 border border-slate-800/60 transition flex items-center justify-between group cursor-pointer"
                 >
-                  <span>Verify Cryptographic Audit</span>
-                  <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="p-1.5 rounded-lg bg-purple-500/10 text-purple-400 border border-purple-500/20 group-hover:bg-purple-500/20 transition shrink-0">
+                      <Sparkles className="w-3.5 h-3.5" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="font-semibold text-slate-200 group-hover:text-white text-xs truncate">Cryptographic Audit</div>
+                      <div className="text-[10px] text-slate-400 truncate">SHA-256 tamper-proof log</div>
+                    </div>
+                  </div>
+                  <kbd className="font-mono text-[10px] text-slate-400 group-hover:text-slate-200 bg-slate-900/80 px-1.5 py-0.5 rounded border border-slate-800 shrink-0 ml-2">
+                    ⌥4
+                  </kbd>
                 </button>
               </div>
             </div>
@@ -836,18 +994,28 @@ export default function AdminPage() {
       <footer className="border-t border-slate-200 bg-white py-4 px-4 sm:px-6 text-xs text-slate-500 mt-12">
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row justify-between items-center gap-2">
           <div className="flex items-center gap-2">
-            <span className="font-bold text-slate-700">GreenValley Dairy Farm Portal</span>
+            <span className="font-bold text-slate-700">MilkFlow Dairy Operations Portal</span>
             <span>•</span>
-            <span>Plot 42, Anand-Nadiad Highway</span>
+            <span>PostgreSQL Authoritative DB</span>
           </div>
           <div className="flex items-center gap-2">
-            <span>Server-side Authenticated Session:</span>
-            <span className="font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-              Suresh Patel (Farmer Admin)
-            </span>
+            <span>Server-side Authenticated Session Active</span>
           </div>
         </div>
       </footer>
+
+      {/* Mobile Bottom Navigation for 1-Thumb Field Use */}
+      <BottomNav
+        activeId={['daily', 'customers', 'billing', 'requests'].includes(activeTab) ? activeTab : 'more'}
+        onChange={(id) => setActiveTab(id)}
+        items={[
+          { id: 'daily', label: 'Daily Run', icon: <Truck className="w-5 h-5" /> },
+          { id: 'customers', label: 'Clients', icon: <UserCheck className="w-5 h-5" /> },
+          { id: 'billing', label: 'Bills', icon: <FileText className="w-5 h-5" /> },
+          { id: 'requests', label: 'Requests', icon: <Clock className="w-5 h-5" />, badge: totalPendingRequests },
+          { id: 'more', label: 'More', icon: <Layers className="w-5 h-5" /> },
+        ]}
+      />
     </div>
   );
 }

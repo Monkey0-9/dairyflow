@@ -45,6 +45,10 @@ export default function BillingManager({
   const [payMethod, setPayMethod] = useState<PaymentMethod>('UPI');
   const [payNote, setPayNote] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isRecalculating, setIsRecalculating] = useState(false);
+  // Failed payment saves keep the modal open with the server message.
+  const [payError, setPayError] = useState<string | null>(null);
+  const [recalcError, setRecalcError] = useState<string | null>(null);
   const { t } = useT();
 
   // Financial KPI totals
@@ -82,6 +86,7 @@ export default function BillingManager({
     e.preventDefault();
     if (!activeInvoiceForPay || !payAmount) return;
     setIsProcessing(true);
+    setPayError(null);
     try {
       await onRecordPayment(
         activeInvoiceForPay.id,
@@ -89,12 +94,25 @@ export default function BillingManager({
         payMethod,
         payNote || `Offline payment received via ${payMethod}`
       );
+      // Parent throws on failure — reaching here means the payment saved.
       setActiveInvoiceForPay(null);
       onRefresh();
     } catch (err) {
-      console.error('Error recording payment', err);
+      setPayError(err instanceof Error ? err.message : 'Payment failed to save. Please retry.');
     } finally {
       setIsProcessing(false);
+    }
+  };
+
+  const handleRecalculate = async () => {
+    setIsRecalculating(true);
+    setRecalcError(null);
+    try {
+      await onRecalculateAll();
+    } catch (err) {
+      setRecalcError(err instanceof Error ? err.message : 'Recalculation failed. Please retry.');
+    } finally {
+      setIsRecalculating(false);
     }
   };
 
@@ -164,11 +182,12 @@ export default function BillingManager({
             ))}
           </div>
           <button
-            onClick={onRecalculateAll}
-            className="flex-1 sm:flex-initial px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold flex items-center justify-center gap-2 shadow-xs transition"
+            onClick={handleRecalculate}
+            disabled={isRecalculating}
+            className="flex-1 sm:flex-initial px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-xs font-bold flex items-center justify-center gap-2 shadow-xs transition"
           >
             <RefreshCw className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Recalculate All From Ledger</span>
+            <span>{isRecalculating ? 'Recalculating…' : 'Recalculate All From Ledger'}</span>
           </button>
 
           <button
@@ -180,6 +199,12 @@ export default function BillingManager({
           </button>
         </div>
       </div>
+
+      {recalcError && (
+        <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-800" role="alert">
+          <span className="font-bold">Recalculation failed: </span>{recalcError}
+        </div>
+      )}
 
       {/* Financial KPIs */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -383,6 +408,11 @@ export default function BillingManager({
             </div>
 
             <form onSubmit={handleConfirmPayment} className="p-6 space-y-4 text-xs">
+              {payError && (
+                <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800" role="alert">
+                  <span className="font-bold">Payment not recorded: </span>{payError}
+                </div>
+              )}
               <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 flex justify-between items-center">
                 <span className="text-slate-500">Total Outstanding Due:</span>
                 <span className="font-mono font-black text-rose-600 text-base">
