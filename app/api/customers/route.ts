@@ -348,6 +348,12 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'customerId is required to remove client' }, { status: 400 });
     }
 
+    // Production path: durable soft-close in PostgreSQL (preserves ledger,
+    // invoice and audit history; avoids FK violations on hard delete).
+    if (!isTestMode()) {
+      return await deleteCustomerDurable(customerId);
+    }
+
     const store = getStore();
     const removed = store.deleteCustomer(customerId);
 
@@ -395,6 +401,13 @@ export async function PATCH(req: NextRequest) {
       quantity,
       customPrice,
     } = body;
+
+    // Production path: PostgreSQL-first so edits to real DB rows save even
+    // though the in-memory store starts empty (no demo data) in production.
+    if (!isTestMode()) {
+      return await patchCustomerDurable(body);
+    }
+
     const store = getStore();
 
     if (!customerId) {
@@ -616,6 +629,152 @@ async function createCustomerDurable(session: { userId: string; tenantId: string
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Failed to add customer';
     console.error('[Customer API POST] durable write failed:', error);
+    return NextResponse.json({ success: false, error: message }, { status: 500 });
+  }
+}
+
+async function patchCustomerDurable(body: any) {
+  try {
+    const { customerId, action, status, approvedBy, name, email, phone, address,
+      productId, quantity, customPrice } = body;
+    if (!customerId) {
+      return NextResponse.json({ success: false, error: 'customerId is required' }, { status: 400 });
+    }
+
+    const custRes = await query<{ id: string; user_id: string; tenant_id: string; farmer_id: string }>(
+      `SELECT id, user_id as user_id, tenant_id as tenant_id, farmer_id as farmer_id FROM customer_profiles WHERE id = $1`,
+      [customerId]
+    );
+    if (custRes.rows.length === 0) {
+      return NextResponse.json({ success: false, error: 'Customer not found' }, { status: 404 });
+    }
+    const dbCust = custRes.rows[0];
+
+    // 1. APPROVE ACTION — activate in DB first.
+    if (action === 'APPROVE') {
+      await query(`UPDATE customer_profiles SET is_active = true, status = 'ACTIVE', updated_at = NOW() WHERE id = $1`, [customerId]);
+      await query(`UPDATE users SET is_active = true, updated_at = NOW() WHERE id = $1`, [dbCust.user_id]);
+      await query(`UPDATE subscriptions SET status = 'ACTIVE', updated_at = NOW() WHERE customer_id = $1`, [customerId]);
+
+      // Bootstrap today's delivery record from the DB subscription product.
+      try {
+        const sub = await query<{ product_id: string; quantity: number }>(
+          `SELECT product_id as product_id, quantity::float as quantity FROM subscriptions WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 1`,
+          [customerId]
+        );
+        if (sub.rows.length > 0) {
+          const prod = await query(`SELECT price_per_unit as "price" FROM products WHERE id = $1`, [sub.rows[0].product_id]);
+          const price = prod.rows[0]?.price ?? 50.0;
+          const todayStr = new Date().toISOString().split('T')[0];
+          await query(
+            `INSERT INTO delivery_records (id, tenant_id, customer_id, farmer_id, product_id, date, scheduled_quantity, delivered_quantity, price_per_unit, status)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'EXPECTED')
+             ON CONFLICT (customer_id, date, product_id) DO NOTHING`,
+            [newUuid(), dbCust.tenant_id, customerId, dbCust.farmer_id, sub.rows[0].product_id, todayStr, sub.rows[0].quantity, sub.rows[0].quantity, price]
+          );
+        }
+      } catch (e) {
+        console.warn('[Customer API PATCH Approve] delivery bootstrap warning:', e);
+      }
+
+      try {
+        const store = getStore();
+        if (store.customers.some((c) => c.id === customerId)) store.approveCustomer(customerId, approvedBy || 'Admin');
+        await syncDbCustomersIntoStore();
+      } catch { /* cache mirror best-effort */ }
+
+      return NextResponse.json({ success: true, message: 'Client has been approved and activated!', customerId });
+    }
+
+    // 2. GENERAL UPDATE — users + profile + subscription in DB first.
+    if (email !== undefined || phone !== undefined) {
+      const dup = await query(
+        `SELECT id FROM users WHERE (phone = $1 OR email = $2) AND id <> $3 LIMIT 1`,
+        [phone ?? '', email ?? '', dbCust.user_id]
+      );
+      if (dup.rows.length > 0) {
+        return NextResponse.json({ success: false, error: 'Another user already uses this phone number or email.' }, { status: 409 });
+      }
+      await query(
+        `UPDATE users SET name = COALESCE($1, name), email = COALESCE($2, email), phone = COALESCE($3, phone), updated_at = NOW() WHERE id = $4`,
+        [name || null, email || null, phone || null, dbCust.user_id]
+      );
+    }
+    await query(
+      `UPDATE customer_profiles
+       SET daily_quantity = COALESCE($1, daily_quantity),
+           delivery_address = COALESCE($2, delivery_address),
+           updated_at = NOW()
+       WHERE id = $3`,
+      [quantity !== undefined ? parseFloat(String(quantity)) : null, address || null, customerId]
+    );
+    if (status !== undefined) {
+      const isActive = status === 'ACTIVE';
+      await query(`UPDATE customer_profiles SET is_active = $1, status = $2, updated_at = NOW() WHERE id = $3`, [isActive, status, customerId]);
+      await query(`UPDATE users SET is_active = $1, updated_at = NOW() WHERE id = $2`, [isActive, dbCust.user_id]);
+      await query(`UPDATE subscriptions SET status = $1, updated_at = NOW() WHERE customer_id = $2`, [isActive ? 'ACTIVE' : 'PAUSED', customerId]);
+    }
+    if (productId !== undefined || quantity !== undefined) {
+      let subProductId: string | null = null;
+      if (isUuid(productId)) {
+        const p = await query(`SELECT id FROM products WHERE id = $1 AND tenant_id = $2`, [productId, dbCust.tenant_id]);
+        if (p.rows.length === 0) {
+          return NextResponse.json({ success: false, error: 'Invalid productId for this dairy.' }, { status: 400 });
+        }
+        subProductId = productId;
+      }
+      await query(
+        `UPDATE subscriptions SET product_id = COALESCE($1, product_id), quantity = COALESCE($2, quantity), updated_at = NOW()
+         WHERE customer_id = $3`,
+        [subProductId, quantity !== undefined ? parseFloat(String(quantity)) : null, customerId]
+      );
+      void customPrice;
+    }
+
+    try {
+      const store = getStore();
+      if (store.customers.some((c) => c.id === customerId)) {
+        store.updateCustomer(customerId, {
+          name, email, phone, address,
+          quantity: quantity !== undefined ? parseFloat(String(quantity)) : undefined,
+          productId: isUuid(productId) ? productId : undefined,
+          status,
+        });
+      }
+      await syncDbCustomersIntoStore();
+    } catch { /* cache mirror best-effort */ }
+
+    return NextResponse.json({ success: true, message: 'Client updated successfully.', customerId });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Failed to update customer';
+    console.error('[Customer API PATCH] durable write failed:', error);
+    return NextResponse.json({ success: false, error: message }, { status: 500 });
+  }
+}
+
+async function deleteCustomerDurable(customerId: string) {
+  try {
+    // Soft-close: preserves delivery/invoice/payment/audit history and
+    // cannot violate foreign keys. The client leaves the active roster.
+    const res = await query(
+      `UPDATE customer_profiles SET is_active = false, status = 'CLOSED', updated_at = NOW() WHERE id = $1 RETURNING user_id`,
+      [customerId]
+    );
+    if (res.rows.length === 0) {
+      return NextResponse.json({ success: false, error: 'Customer not found or already removed' }, { status: 404 });
+    }
+    await query(`UPDATE users SET is_active = false, updated_at = NOW() WHERE id = $1`, [res.rows[0].user_id]);
+    await query(`UPDATE subscriptions SET status = 'CANCELLED', updated_at = NOW() WHERE customer_id = $1`, [customerId]);
+
+    try {
+      const store = getStore();
+      if (store.customers.some((c) => c.id === customerId)) store.deleteCustomer(customerId);
+    } catch { /* cache mirror best-effort */ }
+
+    return NextResponse.json({ success: true, message: `Customer ${customerId} successfully removed.`, customerId });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Failed to remove customer';
+    console.error('[Customer API DELETE] durable write failed:', error);
     return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
 }
