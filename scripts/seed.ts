@@ -8,7 +8,12 @@ function computeSha256(data: string): string {
 }
 
 async function seed() {
-  console.log('🌱 Starting MilkFlow database seeding on Neon PostgreSQL...');
+  if (process.env.NODE_ENV === 'production' || process.env.VERCEL) {
+    console.error('❌ CRITICAL PROTECTION: scripts/seed.ts cannot be executed in production environment (NODE_ENV=production). Aborting.');
+    process.exit(1);
+  }
+
+  console.log('🌱 Starting MilkFlow database seeding on Neon PostgreSQL (development environment)...');
 
   await transaction(async (client) => {
     // Clean up existing data in reverse order of foreign keys

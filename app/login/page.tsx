@@ -2,8 +2,7 @@
 
 import React, { useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Droplets, Lock, Phone, ShieldCheck, AlertCircle } from 'lucide-react';
-import Link from 'next/link';
+import { Droplets, Lock, Phone, ShieldCheck, AlertCircle, Eye, EyeOff } from 'lucide-react';
 import { useT, LanguageToggle } from '@/lib/i18n';
 
 function LoginForm() {
@@ -14,6 +13,7 @@ function LoginForm() {
 
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -114,14 +114,22 @@ function LoginForm() {
                 <Lock className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
                 <input
                   id="login-password"
-                  type="password"
+                  type={showPassword ? 'text' : 'password'}
                   required
                   autoComplete="current-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="Enter your account password"
-                  className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 text-xs font-semibold focus:outline-none focus:border-emerald-500 bg-slate-50 focus:bg-white transition"
+                  className="w-full pl-10 pr-10 py-2.5 rounded-xl border border-slate-200 text-xs font-semibold focus:outline-none focus:border-emerald-500 bg-slate-50 focus:bg-white transition"
                 />
+                <button
+                  type="button"
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
               </div>
             </div>
 
@@ -135,24 +143,18 @@ function LoginForm() {
             </button>
           </form>
 
-          {/* Admin Info Box */}
+          {/* Admin Credentials Info */}
           <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 text-xs text-slate-600 flex items-start gap-2">
             <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
             <div className="text-[11px] leading-relaxed">
-              <strong>Admin Account:</strong> <code className="font-mono bg-slate-200/70 px-1 py-0.5 rounded text-slate-900">prakashparaveen046@gmail.com</code>
+              <strong>Admin Access:</strong> <code className="font-mono bg-slate-200/70 px-1 py-0.5 rounded text-slate-900">prakashparaveen046@gmail.com</code>
             </div>
           </div>
 
-          {/* Link to Client Registration */}
+          {/* Client Invitation Notice */}
           <div className="pt-2 text-center border-t border-slate-100">
-            <p className="text-xs text-slate-600">
-              New client?{' '}
-              <Link
-                href="/register"
-                className="font-bold text-emerald-600 hover:text-emerald-700 hover:underline"
-              >
-                Register here (Pending Admin Approval) →
-              </Link>
+            <p className="text-xs text-slate-500 leading-relaxed">
+              Client accounts are onboarding-by-invitation only. Contact your dairy farmer or administrator to receive an invitation link.
             </p>
           </div>
         </div>

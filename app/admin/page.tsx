@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import {
   DeliveryRecord,
   Product,
@@ -43,6 +44,7 @@ import {
   UserCheck,
   Truck,
   PlusCircle,
+  User,
   XCircle,
 } from 'lucide-react';
 
@@ -431,6 +433,14 @@ export default function AdminPage() {
             </div>
 
             <div className="flex items-center gap-2">
+              <Link
+                href="/admin/profile"
+                className="px-3 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-xs font-bold flex items-center gap-1.5 transition border border-emerald-500/30 cursor-pointer"
+                title="Admin & Farmer Profile"
+              >
+                <User className="w-3.5 h-3.5" />
+                <span>Profile</span>
+              </Link>
               <button
                 onClick={loadAdminData}
                 className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
