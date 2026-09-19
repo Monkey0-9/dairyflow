@@ -34,6 +34,7 @@ import {
 import InvoiceModal from '../common/InvoiceModal';
 import ReceiptModal from '../common/ReceiptModal';
 import { useMilkFlowEvents, playNotificationChime } from '@/lib/use-milkflow-events';
+import { useT } from '@/lib/i18n';
 
 interface CustomerPortalProps {
   currentUserId: string;
@@ -66,28 +67,51 @@ export default function CustomerPortal({
   const [razorOrderId, setRazorOrderId] = useState<string>('');
   const [orderSandbox, setOrderSandbox] = useState(true);
 
+  // Dynamic Today & Default Dates
+  const todayStr = new Date().toISOString().split('T')[0];
+
   // Issue Reporting Form
-  const [issueDate, setIssueDate] = useState('2026-09-16');
+  const [issueDate, setIssueDate] = useState(todayStr);
   const [issueClaimedQty, setIssueClaimedQty] = useState('0');
   const [issueReason, setIssueReason] = useState('DID_NOT_RECEIVE');
   const [issueNote, setIssueNote] = useState('');
   const [issueSuccess, setIssueSuccess] = useState(false);
 
   // Vacation Form
-  const [vacStart, setVacStart] = useState('2026-09-20');
-  const [vacEnd, setVacEnd] = useState('2026-09-25');
-  const [vacReason, setVacReason] = useState('Family holiday to native village');
+  const [vacStart, setVacStart] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    return d.toISOString().split('T')[0];
+  });
+  const [vacEnd, setVacEnd] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 5);
+    return d.toISOString().split('T')[0];
+  });
+  const [vacReason, setVacReason] = useState('Family holiday');
   const [vacSuccess, setVacSuccess] = useState(false);
 
   // Extra Milk Form
-  const [extraStart, setExtraStart] = useState('2026-09-18');
-  const [extraEnd, setExtraEnd] = useState('2026-09-19');
+  const [extraStart, setExtraStart] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    return d.toISOString().split('T')[0];
+  });
+  const [extraEnd, setExtraEnd] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 2);
+    return d.toISOString().split('T')[0];
+  });
   const [extraQty, setExtraQty] = useState('2.0');
-  const [extraReason, setExtraReason] = useState('Guests arriving for festival');
+  const [extraReason, setExtraReason] = useState('Guests arriving');
   const [extraSuccess, setExtraSuccess] = useState(false);
 
   // Permanent Quantity Change Form
-  const [qtyEffective, setQtyEffective] = useState('2026-10-01');
+  const [qtyEffective, setQtyEffective] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    return d.toISOString().split('T')[0];
+  });
   const [qtyNew, setQtyNew] = useState('1.5');
   const [qtyReason, setQtyReason] = useState('');
   const [qtySuccess, setQtySuccess] = useState(false);
@@ -97,7 +121,7 @@ export default function CustomerPortal({
 
   // Find customer matching current persona
   const currentCustomer =
-    customers.find((c) => c.userId === currentUserId) || customers[0];
+    customers.find((c) => c.userId === currentUserId || c.id === currentUserId) || customers[0];
 
   const fetchCustomerDetails = async () => {
     if (!currentCustomer) return;
@@ -117,10 +141,10 @@ export default function CustomerPortal({
         setMilkRequests(dashData.data.milkRequests || []);
       }
 
-      // Fetch today's delivery record
-      const todayRes = await fetch(`/api/ledger?date=2026-09-16`);
+      // Fetch today's delivery record dynamically
+      const todayRes = await fetch(`/api/ledger?date=${todayStr}&customerId=${currentCustomer.id}`);
       const todayData = await todayRes.json();
-      if (todayData.success) {
+      if (todayData.success && todayData.records) {
         const myToday = todayData.records.find(
           (r: DeliveryRecord) => r.customerId === currentCustomer.id
         );
@@ -139,6 +163,7 @@ export default function CustomerPortal({
 
   // Live updates: farmer approvals / delivery changes arrive via SSE
   const [liveNotice, setLiveNotice] = useState<string | null>(null);
+  const { t } = useT();
   useMilkFlowEvents((evt) => {
     if (
       evt.type === 'request:approved' ||
@@ -223,14 +248,20 @@ export default function CustomerPortal({
     );
   }
 
+  const currentMonthName = new Date().toLocaleDateString('en-IN', { month: 'long' });
   const latestInvoice: Invoice | undefined = customerData.invoices?.find(
-    (i: Invoice) => i.month === 9 && i.year === 2026
+    (i: Invoice) => i.month === (new Date().getMonth() + 1) && i.year === new Date().getFullYear()
   ) || customerData.invoices?.[0];
 
-  const totalLitresMonth = latestInvoice?.totalQuantity || 27.0;
-  const estimatedBill = latestInvoice?.totalAmount || 1350;
-  const amountPaid = latestInvoice?.paidAmount || 1000;
-  const outstandingDue = latestInvoice?.outstandingAmount || 350;
+  const totalLitresMonth = latestInvoice?.totalQuantity || (customerData?.subscription?.defaultQuantity ? customerData.subscription.defaultQuantity * (todayRecord?.deliveredQuantity ? 1 : 0) : 0);
+  const estimatedBill = latestInvoice?.totalAmount || (totalLitresMonth * (customerData?.subscription?.customPricePerUnit || 50));
+  const amountPaid = latestInvoice?.paidAmount || 0;
+  const outstandingDue = latestInvoice?.outstandingAmount || Math.max(0, estimatedBill - amountPaid);
+
+  const isTodayDelivered = todayRecord?.status === 'DELIVERED' || todayRecord?.status === 'EXTRA';
+  const isTodaySkipped = todayRecord?.status === 'SKIPPED';
+  const isTodayPartial = todayRecord?.status === 'PARTIAL';
+  const isTodayDisputed = todayRecord?.hasDispute || todayRecord?.status === 'DISPUTED';
 
   // Submit Issue Dispute
   const handleReportIssue = async (e: React.FormEvent) => {
@@ -339,7 +370,8 @@ export default function CustomerPortal({
   };
 
   // Handle Online Payment
-  const handleProcessPayment = async (e: React.FormEvent) => {    e.preventDefault();
+  const handleProcessPayment = async (e: React.FormEvent) => {
+    e.preventDefault();
     if (!latestInvoice) return;
     setIsPaying(true);
     try {
@@ -378,35 +410,139 @@ export default function CustomerPortal({
   return (
     <div className="space-y-6 max-w-5xl mx-auto pb-16">
       {liveNotice && (
-        <div className="bg-emerald-600 text-white text-xs font-bold px-4 py-2.5 rounded-2xl shadow flex items-center gap-2 animate-pulse">
+        <div role="status" aria-live="polite" className="bg-emerald-600 text-white text-xs font-bold px-4 py-2.5 rounded-2xl shadow flex items-center gap-2 animate-pulse">
           <span className="inline-block w-2 h-2 rounded-full bg-white" />
-          Live update: {liveNotice}
+          {t('cust.liveUpdate')}: {liveNotice}
         </div>
       )}
       {/* Welcome Banner */}
-      <div className="bg-gradient-to-r from-emerald-800 to-teal-700 text-white p-6 sm:p-8 rounded-3xl shadow-lg relative overflow-hidden">
+      <div className="bg-linear-to-r from-emerald-900 via-teal-800 to-emerald-800 text-white p-6 sm:p-8 rounded-3xl shadow-xl relative overflow-hidden ring-1 ring-white/10">
         <div className="relative z-10 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div>
-            <span className="text-[11px] font-extrabold uppercase tracking-wider text-emerald-200 bg-emerald-900/60 px-2.5 py-0.5 rounded-full border border-emerald-700">
-              Customer Portal • {currentCustomer.customerCode}
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-200 bg-emerald-950/70 px-3 py-0.5 rounded-full border border-emerald-700/60 shadow-2xs">
+                {t('cust.portal')} • {currentCustomer.customerCode}
+              </span>
+              <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-300 bg-emerald-900/60 px-2 py-0.5 rounded-full">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                Live Sync
+              </span>
+            </div>
             <h1 className="text-2xl sm:text-3xl font-black mt-2 tracking-tight">
-              Welcome back, {currentCustomer.name} 👋
+              {t('cust.welcome')}, {currentCustomer.name} 👋
             </h1>
             <p className="text-xs text-emerald-100 mt-1">
-              GreenValley Dairy Farm • {customerData.subscription?.productName || 'Fresh Cow Milk'} •{' '}
-              {customerData.subscription?.defaultQuantity} L / day
+              GreenValley Farm • {customerData.subscription?.productName || 'Fresh Cow Milk'} •{' '}
+              {customerData.subscription?.defaultQuantity || 1} L / day
             </p>
           </div>
 
           <div className="flex items-center gap-2">
             <button
               onClick={() => setActiveTab('QR')}
-              className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 backdrop-blur-md border border-white/20 transition"
+              className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-2xl text-xs font-bold flex items-center gap-1.5 backdrop-blur-md border border-white/20 transition hover-lift cursor-pointer shadow-xs"
             >
               <QrCode className="w-4 h-4 text-emerald-300" />
-              <span>Door QR Card</span>
+              <span>Door QR Pass</span>
             </button>
+          </div>
+        </div>
+      </div>
+
+      {/* FAANG Real-time Delivery Tracker Widget */}
+      <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-xs hover-glow-emerald transition-all">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-4 border-b border-slate-100">
+          <div className="flex items-center gap-2">
+            <Droplets className="w-4 h-4 text-emerald-600" />
+            <span className="text-xs font-black uppercase tracking-wider text-slate-900">
+              Live Delivery Status Tracker
+            </span>
+          </div>
+          <div className="flex items-center gap-2 text-xs">
+            <span className="text-slate-400 font-medium">Date:</span>
+            <span className="font-bold text-slate-800">
+              {new Date().toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })}
+            </span>
+          </div>
+        </div>
+
+        {/* 3-Step Visual Progress Track */}
+        <div className="pt-6 pb-2">
+          <div className="grid grid-cols-3 relative">
+            {/* Horizontal connection line */}
+            <div className="absolute top-4 left-1/6 right-1/6 h-0.5 bg-slate-200 z-0">
+              <div
+                className="h-full bg-emerald-500 transition-all duration-700"
+                style={{
+                  width: isTodayDelivered ? '100%' : isTodaySkipped ? '0%' : '50%',
+                }}
+              />
+            </div>
+
+            {/* Step 1: Scheduled */}
+            <div className="flex flex-col items-center text-center relative z-10">
+              <div className="w-8 h-8 rounded-full bg-emerald-600 text-white flex items-center justify-center font-bold text-xs shadow-xs ring-4 ring-emerald-50">
+                <Clock className="w-4 h-4" />
+              </div>
+              <span className="text-xs font-bold text-slate-900 mt-2">Scheduled</span>
+              <span className="text-[10px] text-slate-400 font-mono">06:00 AM</span>
+            </div>
+
+            {/* Step 2: Out for Delivery */}
+            <div className="flex flex-col items-center text-center relative z-10">
+              <div
+                className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs shadow-xs ring-4 ${
+                  isTodayDelivered
+                    ? 'bg-emerald-600 text-white ring-emerald-50'
+                    : isTodaySkipped
+                    ? 'bg-slate-200 text-slate-500 ring-slate-100'
+                    : 'bg-amber-500 text-white ring-amber-50 animate-pulse'
+                }`}
+              >
+                🚚
+              </div>
+              <span className="text-xs font-bold text-slate-900 mt-2">On Route</span>
+              <span className="text-[10px] text-slate-400 font-mono">Morning Shift</span>
+            </div>
+
+            {/* Step 3: Delivered to Doorstep */}
+            <div className="flex flex-col items-center text-center relative z-10">
+              <div
+                className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs shadow-xs ring-4 ${
+                  isTodayDelivered
+                    ? 'bg-emerald-600 text-white ring-emerald-50'
+                    : isTodaySkipped
+                    ? 'bg-rose-500 text-white ring-rose-50'
+                    : 'bg-slate-200 text-slate-400 ring-slate-100'
+                }`}
+              >
+                {isTodayDelivered ? (
+                  <CheckCircle2 className="w-4 h-4" />
+                ) : isTodaySkipped ? (
+                  '✕'
+                ) : (
+                  <CheckCircle2 className="w-4 h-4" />
+                )}
+              </div>
+              <span
+                className={`text-xs font-black mt-2 ${
+                  isTodayDelivered
+                    ? 'text-emerald-700'
+                    : isTodaySkipped
+                    ? 'text-rose-600'
+                    : 'text-slate-400'
+                }`}
+              >
+                {isTodayDelivered
+                  ? `${todayRecord?.deliveredQuantity}L Delivered`
+                  : isTodaySkipped
+                  ? 'Delivery Skipped'
+                  : 'Door Drop'}
+              </span>
+              <span className="text-[10px] text-slate-400 font-mono">
+                {isTodayDelivered ? 'Confirmed' : isTodaySkipped ? 'By Request' : 'Pending'}
+              </span>
+            </div>
           </div>
         </div>
       </div>
@@ -414,39 +550,41 @@ export default function CustomerPortal({
       {/* KPI Cards: Today's Milk + Month Summary */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         {/* Today's Milk Card */}
-        <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-xs flex flex-col justify-between">
+        <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-xs flex flex-col justify-between metric-accent-emerald hover-lift">
           <div>
             <div className="flex justify-between items-center text-xs">
               <span className="font-bold text-slate-400 uppercase tracking-wider text-[10px]">
                 Today's Delivery
               </span>
-              <span className="text-[10px] text-slate-400 font-semibold">16 Sep</span>
+              <span className="text-[10px] text-slate-400 font-semibold">
+                {new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+              </span>
             </div>
             <div className="text-2xl font-black text-slate-900 font-mono mt-2">
-              {todayRecord ? todayRecord.deliveredQuantity : customerData.subscription?.defaultQuantity}{' '}
+              {todayRecord ? todayRecord.deliveredQuantity : (customerData.subscription?.defaultQuantity || 0)}{' '}
               <span className="text-sm font-bold text-slate-400">L</span>
             </div>
           </div>
 
           <div className="mt-3 pt-3 border-t border-slate-100 flex items-center justify-between">
             <span
-              className={`text-[10px] font-extrabold px-2.5 py-0.5 rounded-full uppercase ${
-                todayRecord?.status === 'DELIVERED' || todayRecord?.status === 'EXTRA'
+              className={`text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase ${
+                isTodayDelivered
                   ? 'bg-emerald-100 text-emerald-800'
-                  : todayRecord?.status === 'SKIPPED'
+                  : isTodaySkipped
                   ? 'bg-slate-200 text-slate-700'
-                  : todayRecord?.status === 'PARTIAL'
+                  : isTodayPartial
                   ? 'bg-amber-100 text-amber-800'
-                  : 'bg-rose-100 text-rose-800'
+                  : 'bg-slate-100 text-slate-600'
               }`}
             >
-              {todayRecord?.status || 'DELIVERED'}
+              {todayRecord?.status || 'SCHEDULED'}
             </span>
 
             {todayRecord && !todayRecord.hasDispute && (
               <button
                 onClick={() => setActiveTab('REPORT_ISSUE')}
-                className="text-[11px] font-bold text-slate-500 hover:text-rose-600 transition"
+                className="text-[11px] font-bold text-slate-500 hover:text-rose-600 transition cursor-pointer"
               >
                 Report Issue
               </button>
@@ -455,10 +593,10 @@ export default function CustomerPortal({
         </div>
 
         {/* Total Consumed Month */}
-        <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-xs flex flex-col justify-between">
+        <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-xs flex flex-col justify-between metric-accent-indigo hover-lift">
           <div>
             <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-              September Milk
+              {currentMonthName} Milk
             </div>
             <div className="text-2xl font-black text-slate-900 font-mono mt-2">
               {totalLitresMonth}{' '}
@@ -471,10 +609,10 @@ export default function CustomerPortal({
         </div>
 
         {/* Estimated Bill */}
-        <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-xs flex flex-col justify-between">
+        <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-xs flex flex-col justify-between metric-accent-amber hover-lift">
           <div>
             <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-              Total September Bill
+              {currentMonthName} Bill
             </div>
             <div className="text-2xl font-black text-slate-900 font-mono mt-2">
               ₹{estimatedBill.toLocaleString()}
@@ -486,14 +624,14 @@ export default function CustomerPortal({
         </div>
 
         {/* Outstanding Due + Pay Now Button */}
-        <div className="bg-white p-5 rounded-3xl border-2 border-rose-200 bg-rose-50/20 shadow-xs flex flex-col justify-between">
+        <div className="p-5 rounded-3xl border-2 border-rose-200 bg-rose-50/20 shadow-xs flex flex-col justify-between metric-accent-rose hover-lift">
           <div>
             <div className="flex justify-between items-center">
               <span className="text-[10px] font-bold text-rose-600 uppercase tracking-wider">
                 Balance Due
               </span>
               <span className="text-[10px] bg-rose-100 text-rose-800 px-2 py-0.2 rounded-full font-bold">
-                Due Oct 05
+                Due 5th
               </span>
             </div>
             <div className="text-2xl font-black text-rose-600 font-mono mt-2">
@@ -508,15 +646,15 @@ export default function CustomerPortal({
                   setPayAmount(outstandingDue.toString());
                   setShowPayModal(true);
                 }}
-                className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs transition flex items-center justify-center gap-1"
+                className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs transition flex items-center justify-center gap-1 cursor-pointer hover-lift"
               >
                 <CreditCard className="w-3.5 h-3.5" />
                 <span>Pay ₹{outstandingDue} Now</span>
               </button>
             ) : (
-              <div className="text-center text-xs font-bold text-emerald-600 flex items-center justify-center gap-1">
+              <div className="text-center text-xs font-bold text-emerald-600 flex items-center justify-center gap-1 py-1">
                 <CheckCircle2 className="w-4 h-4" />
-                <span>Fully Paid!</span>
+                <span>No Balance Due!</span>
               </div>
             )}
           </div>
@@ -526,10 +664,10 @@ export default function CustomerPortal({
       {/* Navigation Sub-Tabs */}
       <div className="flex items-center gap-2 border-b border-slate-200 pb-3 overflow-x-auto scrollbar-none text-xs font-bold">
         {[
-          { id: 'HOME', label: 'Overview' },
-          { id: 'CALENDAR', label: 'Monthly Consumption' },
-          { id: 'BILLING', label: 'Invoices & Receipts' },
-          { id: 'VACATION', label: 'Pause / Vacation Mode' },
+          { id: 'HOME', label: t('ctab.home') },
+          { id: 'CALENDAR', label: t('ctab.calendar') },
+          { id: 'BILLING', label: t('ctab.billing') },
+          { id: 'VACATION', label: t('ctab.vacation') },
           { id: 'REPORT_ISSUE', label: 'Report Issue' },
           { id: 'QR', label: 'My Door QR' },
         ].map((tab) => (
@@ -1318,6 +1456,7 @@ export default function CustomerPortal({
               <h3 className="text-base font-extrabold text-slate-900">Pay Milk Bill Online</h3>
               <button
                 onClick={() => setShowPayModal(false)}
+                aria-label="Close payment dialog"
                 className="p-1.5 rounded-xl hover:bg-slate-100 text-slate-400 hover:text-slate-700"
               >
                 ✕

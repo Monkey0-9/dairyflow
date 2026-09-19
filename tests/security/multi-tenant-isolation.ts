@@ -1,11 +1,38 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll } from 'vitest';
 import { NextRequest } from 'next/server';
 import { encodeSignedSession, decodeSignedSession, hashPassword, verifyPassword, SessionUser } from '@/lib/auth';
 import { authenticateRequest, enforceCustomerOwnership, enforceTenantAccess } from '@/lib/api-auth';
 import { processPayment } from '@/lib/services/payment.service';
 import { getCustomersByFarmer } from '@/lib/services/customer.service';
+import { query } from '@/lib/db';
 
 describe('Phase 5 & Security: Multi-Tenant Isolation & Authorization Attacks', () => {
+  beforeAll(async () => {
+    try {
+      await query(`
+        INSERT INTO tenants (id, name, slug) VALUES ('tenant_greenvalley', 'GreenValley', 'gv') ON CONFLICT DO NOTHING;
+        INSERT INTO tenants (id, name, slug) VALUES ('tenant_sunrise', 'Sunrise', 'sr') ON CONFLICT DO NOTHING;
+        INSERT INTO users (id, tenant_id, name, email, phone, role, password_hash, password_salt)
+        VALUES ('user_farmer', 'tenant_greenvalley', 'Suresh Patel', 'suresh@greenvalleydairy.in', '+919876543210', 'FARMER', 'hash', 'salt')
+        ON CONFLICT DO NOTHING;
+        INSERT INTO farmer_profiles (id, tenant_id, user_id, business_name, upi_id, address)
+        VALUES ('F001', 'tenant_greenvalley', 'user_farmer', 'GreenValley Farm', 'gv@upi', 'Anand')
+        ON CONFLICT DO NOTHING;
+        INSERT INTO users (id, tenant_id, name, email, phone, role, password_hash, password_salt)
+        VALUES ('user_ravi', 'tenant_greenvalley', 'Ravi Kumar', 'ravi.kumar@gmail.com', '+919823456780', 'CUSTOMER', 'hash', 'salt')
+        ON CONFLICT DO NOTHING;
+        INSERT INTO customer_profiles (id, tenant_id, user_id, farmer_id, delivery_address, qr_token, is_active)
+        VALUES ('cust_ravi', 'tenant_greenvalley', 'user_ravi', 'F001', 'Flat 302', 'MK_QR_RAVI_TEST', true)
+        ON CONFLICT DO NOTHING;
+        INSERT INTO invoices (id, tenant_id, customer_id, farmer_id, month, year, total_quantity, total_amount, paid_amount, outstanding_amount, status, due_date)
+        VALUES ('INV_RAVI_AUG_2026', 'tenant_greenvalley', 'cust_ravi', 'F001', 8, 2026, 30.0, 1500.0, 0.0, 1500.0, 'UNPAID', NOW())
+        ON CONFLICT DO NOTHING;
+      `);
+    } catch {
+      // ignore
+    }
+  });
+
   const customerRavi: SessionUser = {
     userId: 'user_ravi',
     name: 'Ravi Kumar',

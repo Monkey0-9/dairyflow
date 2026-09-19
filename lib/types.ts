@@ -1,4 +1,4 @@
-export type UserRole = 'FARMER' | 'CUSTOMER' | 'ADMIN' | 'SUPERADMIN';
+export type UserRole = 'OWNER' | 'MANAGER' | 'DELIVERY_AGENT' | 'ACCOUNTANT' | 'SUPPORT' | 'FARMER' | 'CUSTOMER' | 'ADMIN' | 'SUPERADMIN';
 
 export type DeliveryStatus =
   | 'EXPECTED'
@@ -75,6 +75,7 @@ export interface CustomerProfile {
   customerCode: string; // e.g. "MK-1024"
   qrToken: string; // Opaque secure token e.g. "MK_QR_8f7b2c1a9e"
   name: string;
+  email?: string;
   phone: string;
   address: string;
   deliveryShift: DeliveryShift;
@@ -93,7 +94,7 @@ export interface Product {
   name: string;
   category: ProductCategory;
   unit: string; // "Litre", "Kg", "Bottle"
-  basePrice: number; // e.g. ₹50
+  basePrice: number | null; // e.g. ₹50 or null for dynamic/variable
   description?: string;
   inStock: boolean;
 }
@@ -277,7 +278,7 @@ export interface Payment {
 export interface CryptographicAuditBlock {
   blockIndex: number;
   timestamp: string;
-  entityType: 'DELIVERY_RECORD' | 'INVOICE' | 'DISPUTE' | 'PAYMENT' | 'VACATION' | 'SUBSCRIPTION' | 'DAY_CLOSING';
+  entityType: 'DELIVERY_RECORD' | 'INVOICE' | 'DISPUTE' | 'PAYMENT' | 'VACATION' | 'SUBSCRIPTION' | 'DAY_CLOSING' | 'CUSTOMER';
   entityId: string;
   tenantId: string;
   actor: {

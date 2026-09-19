@@ -17,6 +17,7 @@ import {
 import { Invoice, PaymentMethod } from '@/lib/types';
 import InvoiceModal from '../common/InvoiceModal';
 import { buildReminderMessage, buildWhatsAppLink } from '@/lib/reminders';
+import { useT } from '@/lib/i18n';
 
 interface BillingManagerProps {
   invoices: Invoice[];
@@ -44,6 +45,7 @@ export default function BillingManager({
   const [payMethod, setPayMethod] = useState<PaymentMethod>('UPI');
   const [payNote, setPayNote] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const { t } = useT();
 
   // Financial KPI totals
   let totalBilled = 0;
@@ -141,7 +143,7 @@ export default function BillingManager({
         <div>
           <h2 className="text-xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
             <FileText className="w-5 h-5 text-emerald-600" />
-            <span>Automated Monthly Billing & Invoices</span>
+            <span>{t('billing.title')}</span>
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
             September 2026 • Ledger-calculated dynamically with instant offline/online payment tracking
@@ -150,7 +152,7 @@ export default function BillingManager({
 
         <div className="flex items-center gap-2 w-full sm:w-auto">
           <div className="flex items-center gap-1 text-[11px] font-bold text-slate-500">
-            <span>Reminder:</span>
+            <span>{t('billing.reminder')}:</span>
             {(['en', 'hi', 'mr'] as const).map((l) => (
               <button
                 key={l}

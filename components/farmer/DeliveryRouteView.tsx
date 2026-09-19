@@ -133,7 +133,7 @@ export default function DeliveryRouteView({
   return (
     <div className="space-y-6">
       {isOffline && (
-        <div className="p-3 rounded-2xl bg-slate-900 text-white text-xs font-bold flex items-center gap-2">
+        <div role="status" aria-live="polite" className="p-3 rounded-2xl bg-slate-900 text-white text-xs font-bold flex items-center gap-2">
           <span className="inline-block w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
           Offline Mode Active — drops are queued locally{pendingSync > 0 ? ` (${pendingSync} pending)` : ''} and auto-sync on reconnect.
         </div>
@@ -144,7 +144,7 @@ export default function DeliveryRouteView({
         </div>
       )}
       {syncNotice && (
-        <div className="p-3 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-bold">
+        <div role="status" aria-live="polite" className="p-3 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-bold">
           {syncNotice}
         </div>
       )}

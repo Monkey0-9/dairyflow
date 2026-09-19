@@ -160,9 +160,26 @@ export async function recalculateInvoice(invoiceId: string): Promise<{
       [invoiceId]
     );
     const totalQuantity = itemsRes.rows[0].totalQuantity;
-    const totalAmount = itemsRes.rows[0].totalAmount;
+    let totalAmount = itemsRes.rows[0].totalAmount;
 
-    // 2. Sum up all successful payments
+    // 2. Account for InvoiceAdjustment entries (CREDIT vs DEBIT notes)
+    const adjRes = await client.query(
+      `SELECT type, COALESCE(SUM(amount::float), 0) as "sumAmount"
+       FROM invoice_adjustments WHERE invoice_id = $1
+       GROUP BY type`,
+      [invoiceId]
+    );
+
+    let credits = 0;
+    let debits = 0;
+    for (const r of adjRes.rows) {
+      if (r.type === 'CREDIT' || r.type === 'CREDIT_NOTE') credits += r.sumAmount;
+      if (r.type === 'DEBIT' || r.type === 'DEBIT_NOTE') debits += r.sumAmount;
+    }
+
+    totalAmount = Math.max(0, totalAmount + debits - credits);
+
+    // 3. Sum up all successful payments
     const payRes = await client.query(
       `SELECT COALESCE(SUM(amount::float), 0) as "paidAmount"
        FROM payments WHERE invoice_id = $1 AND status = 'SUCCESS'`,
@@ -172,7 +189,7 @@ export async function recalculateInvoice(invoiceId: string): Promise<{
     const outstandingAmount = Math.max(0, totalAmount - paidAmount);
     const status: InvoiceStatus = outstandingAmount <= 0 ? 'PAID' : (paidAmount > 0 ? 'PARTIALLY_PAID' : 'UNPAID');
 
-    // 3. Update the invoice record atomically
+    // 4. Update the invoice record atomically
     await client.query(
       `UPDATE invoices
        SET total_quantity = $1, total_amount = $2, paid_amount = $3, outstanding_amount = $4, status = $5, updated_at = NOW()

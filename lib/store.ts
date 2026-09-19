@@ -58,12 +58,12 @@ export class MilkFlowStore {
     this.farmer = {
       id: 'farmer_01',
       tenantId: this.tenantId,
-      userId: 'user_farmer',
+      userId: 'user_prakash',
       farmName: 'GreenValley Dairy Farm',
       phone: '+91 98765 43210',
       address: 'Plot 42, Anand-Nadiad Highway, Anand, Gujarat 388001',
-      upiId: 'greenvalley@okaxis',
-      qrPayload: 'upi://pay?pa=greenvalley@okaxis&pn=GreenValley%20Dairy&cu=INR',
+      upiId: 'prakash@okaxis',
+      qrPayload: 'upi://pay?pa=prakash@okaxis&pn=GreenValley%20Dairy&cu=INR',
     };
 
     this.initDemoData();
@@ -202,6 +202,14 @@ export class MilkFlowStore {
   private initDemoData() {
     // 1. Users with tenantId
     this.users = [
+      {
+        id: 'user_prakash',
+        tenantId: this.tenantId,
+        name: 'Prakash Paraveen (Admin)',
+        email: 'prakashparaveen046@gmail.com',
+        phone: '+91 98765 43210',
+        role: 'FARMER',
+      },
       {
         id: 'user_farmer',
         tenantId: this.tenantId,
@@ -1629,6 +1637,8 @@ export class MilkFlowStore {
   public addCustomer(data: {
     name: string;
     phone: string;
+    email?: string;
+    password?: string;
     address: string;
     productId: string;
     quantity: number;
@@ -1637,15 +1647,28 @@ export class MilkFlowStore {
     customPrice?: number;
     notes?: string;
     farmerId?: string;
-  }): CustomerProfile {
+  }): CustomerProfile & { temporaryPassword?: string } {
     const nextSeq = this.customers.length + 1;
     const codeNum = 1024 + this.customers.length;
     const custId = `cust_${Date.now()}`;
     const userId = `user_${custId}`;
     const qrToken = `MK_QR_${crypto.randomBytes(8).toString('hex')}`;
     const assignedFarmerId = data.farmerId || this.farmer.id;
+    const cleanDigits = data.phone.replace(/[^0-9]/g, '');
+    const effectiveEmail = data.email || `${cleanDigits || Date.now()}@dairyclient.com`;
+    const tempPassword = data.password || `Milk#${Math.floor(1000 + Math.random() * 9000)}`;
 
     const prod = this.products.find((p) => p.id === data.productId) || this.products[0];
+
+    const newUser: User = {
+      id: userId,
+      tenantId: this.tenantId,
+      name: data.name,
+      email: effectiveEmail,
+      phone: data.phone,
+      role: 'CUSTOMER',
+    };
+    this.users.push(newUser);
 
     const newCustomer: CustomerProfile = {
       id: custId,
@@ -1655,6 +1678,7 @@ export class MilkFlowStore {
       customerCode: `MK-${codeNum}`,
       qrToken,
       name: data.name,
+      email: effectiveEmail,
       phone: data.phone,
       address: data.address,
       deliveryShift: data.deliveryShift,
@@ -1671,10 +1695,10 @@ export class MilkFlowStore {
       tenantId: this.tenantId,
       customerId: custId,
       farmerId: assignedFarmerId,
-      productId: prod.id,
-      productName: prod.name,
+      productId: prod?.id || 'prod_cow_milk',
+      productName: prod?.name || 'Fresh Cow Milk',
       defaultQuantity: data.quantity,
-      customPricePerUnit: data.customPrice || prod.basePrice,
+      customPricePerUnit: data.customPrice ?? (prod?.basePrice ?? 50.0),
       deliveryDays: ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'],
       deliveryShift: data.deliveryShift,
       startDate: new Date().toISOString().split('T')[0],
@@ -1693,11 +1717,42 @@ export class MilkFlowStore {
       action: 'CUSTOMER_ONBOARDED',
       actor: { userId: 'user_farmer', name: 'Suresh Patel (Farmer)', role: 'FARMER', ipAddress: '127.0.0.1' },
       beforeState: {},
-      afterState: { customerCode: newCustomer.customerCode, name: newCustomer.name, defaultQuantity: data.quantity },
-      reason: 'New customer onboarding',
+      afterState: { customerCode: newCustomer.customerCode, name: newCustomer.name, email: effectiveEmail, defaultQuantity: data.quantity },
+      reason: 'New customer onboarding with login credentials',
     });
 
-    return newCustomer;
+    return { ...newCustomer, temporaryPassword: tempPassword };
+  }
+
+  // Delete / Remove customer
+  public deleteCustomer(customerId: string): boolean {
+    const custIndex = this.customers.findIndex((c) => c.id === customerId);
+    if (custIndex === -1) return false;
+    const removedCust = this.customers[custIndex];
+
+    this.customers.splice(custIndex, 1);
+    this.subscriptions = this.subscriptions.filter((s) => s.customerId !== customerId);
+    this.users = this.users.filter((u) => u.id !== removedCust.userId);
+
+    this.appendCryptographicAudit({
+      entityType: 'CUSTOMER',
+      entityId: customerId,
+      action: 'CUSTOMER_REMOVED',
+      actor: { userId: 'user_farmer', name: 'Suresh Patel (Farmer)', role: 'FARMER', ipAddress: '127.0.0.1' },
+      beforeState: { id: customerId, name: removedCust.name, phone: removedCust.phone },
+      afterState: { removed: true },
+      reason: 'Customer removed by farmer or admin',
+    });
+
+    return true;
+  }
+
+  // Update product price
+  public updateProductPrice(productId: string, price: number | null): Product | null {
+    const prod = this.products.find((p) => p.id === productId);
+    if (!prod) return null;
+    prod.basePrice = price;
+    return prod;
   }
 
   // Add live activity
@@ -2149,6 +2204,84 @@ export class MilkFlowStore {
     return cust;
   }
 
+  // Update existing/present customer profile & subscription
+  public updateCustomer(customerId: string, updates: {
+    name?: string;
+    email?: string;
+    phone?: string;
+    address?: string;
+    deliveryTime?: string;
+    deliveryShift?: DeliveryShift;
+    deliverySequence?: number;
+    notes?: string;
+    productId?: string;
+    quantity?: number;
+    customPrice?: number;
+    status?: AccountStatus;
+  }): CustomerProfile | null {
+    const cust = this.customers.find((c) => c.id === customerId);
+    if (!cust) return null;
+
+    const beforeState = { ...cust };
+
+    if (updates.name !== undefined) cust.name = updates.name;
+    if (updates.email !== undefined) cust.email = updates.email;
+    if (updates.phone !== undefined) cust.phone = updates.phone;
+    if (updates.address !== undefined) cust.address = updates.address;
+    if (updates.deliveryTime !== undefined) cust.deliveryTime = updates.deliveryTime;
+    if (updates.deliveryShift !== undefined) cust.deliveryShift = updates.deliveryShift;
+    if (updates.deliverySequence !== undefined) cust.deliverySequence = updates.deliverySequence;
+    if (updates.notes !== undefined) cust.notes = updates.notes;
+    if (updates.status !== undefined) {
+      cust.accountStatus = updates.status;
+      cust.active = updates.status === 'ACTIVE';
+    }
+
+    // Also update user record if name/email/phone changed
+    const user = this.users.find((u) => u.id === cust.userId);
+    if (user) {
+      if (updates.name !== undefined) user.name = updates.name;
+      if (updates.email !== undefined) user.email = updates.email;
+      if (updates.phone !== undefined) user.phone = updates.phone;
+    }
+
+    // Also update active subscription if productId/quantity/customPrice changed
+    const sub = this.subscriptions.find((s) => s.customerId === customerId);
+    if (sub) {
+      if (updates.productId) {
+        const prod = this.products.find((p) => p.id === updates.productId);
+        if (prod) {
+          sub.productId = prod.id;
+          sub.productName = prod.name;
+        }
+      }
+      if (updates.quantity !== undefined && !isNaN(updates.quantity)) {
+        sub.defaultQuantity = updates.quantity;
+      }
+      if (updates.customPrice !== undefined) {
+        sub.customPricePerUnit = updates.customPrice;
+      }
+      if (updates.deliveryShift) {
+        sub.deliveryShift = updates.deliveryShift;
+      }
+      if (updates.status !== undefined) {
+        sub.active = updates.status === 'ACTIVE';
+      }
+    }
+
+    this.appendCryptographicAudit({
+      entityType: 'CUSTOMER',
+      entityId: cust.id,
+      action: 'CUSTOMER_UPDATED',
+      actor: { userId: 'user_farmer', name: 'Suresh Patel (Farmer)', role: 'FARMER', ipAddress: '127.0.0.1' },
+      beforeState: { name: beforeState.name, phone: beforeState.phone, email: beforeState.email, address: beforeState.address },
+      afterState: { name: cust.name, phone: cust.phone, email: cust.email, address: cust.address, quantity: sub?.defaultQuantity },
+      reason: 'Customer profile updated by farmer/admin',
+    });
+
+    return cust;
+  }
+
   // Register Customer (Public Signup)
   public registerCustomer(params: {
     name: string;
@@ -2206,7 +2339,7 @@ export class MilkFlowStore {
       productId: prod.id,
       productName: prod.name,
       defaultQuantity: params.quantity,
-      customPricePerUnit: prod.basePrice,
+      customPricePerUnit: prod.basePrice ?? undefined,
       deliveryDays: ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'],
       deliveryShift: params.deliveryShift,
       startDate: new Date().toISOString().split('T')[0],
@@ -2332,11 +2465,34 @@ export class MilkFlowStore {
       },
     };
   }
+
+  public clearAllMockData(): void {
+    this.customers = [];
+    this.subscriptions = [];
+    this.deliveryRecords.clear();
+    this.disputes = [];
+    this.invoices = [];
+    this.payments = [];
+    this.vacationPauses = [];
+    this.tempQuantityChanges = [];
+    this.extraMilkRequests = [];
+    this.pauseRequests = [];
+    this.notifications = [];
+    this.activities = [];
+    this.users = this.users.filter((u) => u.role === 'FARMER' || u.role === 'ADMIN');
+  }
 }
 
 export function getStore(): MilkFlowStore {
   if (!global.__milkFlowStore || typeof global.__milkFlowStore.getFarmerRequests !== 'function') {
     global.__milkFlowStore = new MilkFlowStore();
+    if (
+      process.env.VITEST !== 'true' &&
+      (process.env.DEMO_LOGIN_ENABLED === 'false' || process.env.CLEAN_MOCK_DATA === 'true')
+    ) {
+      global.__milkFlowStore.clearAllMockData();
+    }
   }
   return global.__milkFlowStore;
 }
+

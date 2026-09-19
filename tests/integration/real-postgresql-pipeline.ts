@@ -7,7 +7,7 @@ import { appendAuditLog, verifyAuditChain } from '@/lib/services/audit.service';
 
 describe('Stage 2: Real PostgreSQL Database Integration Testing', () => {
   // Use a dedicated isolated test tenant so real database runs do not conflict
-  const runId = Date.now();
+  const runId = `${Date.now()}_${Math.floor(Math.random() * 1000000)}`;
   const testTenantId = `tenant_stage2_${runId}`;
   const testFarmerUserId = `user_f_${runId}`;
   const testFarmerProfileId = `farmer_${runId}`;
@@ -28,7 +28,7 @@ describe('Stage 2: Real PostgreSQL Database Integration Testing', () => {
       await client.query(
         `INSERT INTO users (id, tenant_id, name, email, phone, role, password_hash, password_salt)
         VALUES ($1, $2, $3, $4, $5, 'FARMER', $6, $7)`,
-        [testFarmerUserId, testTenantId, 'Farmer Ramesh', `ramesh_${runId}@dairy.in`, `+91981${runId.toString().slice(-7)}`, hash, salt]
+        [testFarmerUserId, testTenantId, 'Farmer Ramesh', `ramesh_${runId}@dairy.in`, `+91${Math.floor(1000000000 + Math.random() * 9000000000)}`, hash, salt]
       );
 
       await client.query(
@@ -49,7 +49,7 @@ describe('Stage 2: Real PostgreSQL Database Integration Testing', () => {
     await query(
       `INSERT INTO users (id, tenant_id, name, email, phone, role, password_hash, password_salt)
       VALUES ($1, $2, $3, $4, $5, 'CUSTOMER', $6, $7)`,
-      [testCustomerUserId, testTenantId, 'Anita Desai', `anita_${runId}@gmail.com`, `+91972${runId.toString().slice(-7)}`, custHash, custSalt]
+      [testCustomerUserId, testTenantId, 'Anita Desai', `anita_${runId}@gmail.com`, `+91${Math.floor(1000000000 + Math.random() * 9000000000)}`, custHash, custSalt]
     );
 
     await query(

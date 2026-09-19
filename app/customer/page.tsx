@@ -89,40 +89,25 @@ export default function CustomerRoutePage() {
           </div>
 
           <div className="flex items-center gap-3">
-            {/* Quick Customer Switcher for Demo Evaluation */}
-            <div className="hidden sm:flex items-center gap-1 text-xs bg-slate-100 p-1 rounded-xl border border-slate-200">
-              <span className="text-[10px] text-slate-500 font-bold px-2 uppercase">Switch Client:</span>
-              <button
-                onClick={() => handleSwitchCustomerPersona('user_ravi')}
-                className={`px-2.5 py-1 rounded-lg font-bold transition cursor-pointer ${
-                  currentUser?.userId === 'user_ravi'
-                    ? 'bg-emerald-600 text-white shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                Ravi (Active)
-              </button>
-              <button
-                onClick={() => handleSwitchCustomerPersona('user_priya')}
-                className={`px-2.5 py-1 rounded-lg font-bold transition cursor-pointer ${
-                  currentUser?.userId === 'user_priya'
-                    ? 'bg-emerald-600 text-white shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                Priya (Vacation)
-              </button>
-              <button
-                onClick={() => handleSwitchCustomerPersona('user_anand')}
-                className={`px-2.5 py-1 rounded-lg font-bold transition cursor-pointer ${
-                  currentUser?.userId === 'user_anand'
-                    ? 'bg-emerald-600 text-white shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                Anand (Dispute)
-              </button>
-            </div>
+            {/* Dynamic Customer Switcher */}
+            {customers.length > 0 && (
+              <div className="hidden sm:flex items-center gap-1 text-xs bg-slate-100 p-1 rounded-xl border border-slate-200">
+                <span className="text-[10px] text-slate-500 font-bold px-2 uppercase">Client:</span>
+                {customers.slice(0, 4).map((cust) => (
+                  <button
+                    key={cust.id}
+                    onClick={() => handleSwitchCustomerPersona(cust.userId)}
+                    className={`px-2.5 py-1 rounded-lg font-bold transition cursor-pointer ${
+                      currentUser?.userId === cust.userId || (customers.length > 0 && currentUser?.id === cust.id)
+                        ? 'bg-emerald-600 text-white shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    {cust.name.split(' ')[0]}
+                  </button>
+                ))}
+              </div>
+            )}
 
             <button
               onClick={handleLogout}
@@ -136,12 +121,30 @@ export default function CustomerRoutePage() {
       </header>
 
       {/* Main Customer Portal */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        <CustomerPortal
-          currentUserId={currentUser?.userId || 'user_ravi'}
-          customers={customers}
-          onRefreshAll={loadData}
-        />
+      <main id="main-content" className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        {customers.length === 0 ? (
+          <div className="bg-white rounded-2xl p-12 text-center border border-slate-200 shadow-sm max-w-md mx-auto my-12">
+            <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto mb-4 font-bold text-xl">
+              🥛
+            </div>
+            <h3 className="text-lg font-bold text-slate-900">No Customers Added Yet</h3>
+            <p className="text-sm text-slate-500 mt-2">
+              Log in to the Admin Portal to add your first real dairy client.
+            </p>
+            <Link
+              href="/admin"
+              className="mt-6 inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white font-bold text-xs rounded-xl shadow-md hover:bg-emerald-700 transition"
+            >
+              Go to Admin Portal
+            </Link>
+          </div>
+        ) : (
+          <CustomerPortal
+            currentUserId={currentUser?.userId || customers[0]?.userId}
+            customers={customers}
+            onRefreshAll={loadData}
+          />
+        )}
       </main>
 
       {/* Footer */}

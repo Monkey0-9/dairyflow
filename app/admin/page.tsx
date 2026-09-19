@@ -48,7 +48,7 @@ import {
 
 export default function AdminPage() {
   const router = useRouter();
-  const [selectedDate, setSelectedDate] = useState<string>('2026-09-16');
+  const [selectedDate, setSelectedDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
   const [activeTab, setActiveTab] = useState<string>('daily');
 
   // Core store data
@@ -92,7 +92,8 @@ export default function AdminPage() {
       }
 
       // 4. Invoices
-      const invRes = await fetch('/api/invoices?month=9&year=2026');
+      const now = new Date();
+      const invRes = await fetch(`/api/invoices?month=${now.getMonth() + 1}&year=${now.getFullYear()}`);
       const invData = await invRes.json();
       if (invData.success) {
         setInvoices(invData.invoices);
@@ -178,6 +179,19 @@ export default function AdminPage() {
     if (data.success) {
       loadAdminData();
     }
+    return data;
+  };
+
+  // Delete customer
+  const handleDeleteCustomer = async (customerId: string) => {
+    const res = await fetch(`/api/customers?id=${customerId}`, {
+      method: 'DELETE',
+    });
+    const data = await res.json();
+    if (data.success) {
+      loadAdminData();
+    }
+    return data;
   };
 
   // Approve pending customer
@@ -397,9 +411,9 @@ export default function AdminPage() {
       />
 
       {/* Main Workspace */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+      <main id="main-content" className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
         {/* Dynamic Admin Operational Header */}
-        <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-emerald-950 text-white p-6 rounded-3xl shadow-xl space-y-5">
+        <div className="bg-linear-to-r from-slate-900 via-slate-800 to-emerald-950 text-white p-6 rounded-3xl shadow-xl space-y-5">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-white/10 pb-4">
             <div>
               <div className="flex items-center gap-2 mb-1">
@@ -411,7 +425,7 @@ export default function AdminPage() {
               <h1 className="text-2xl font-black tracking-tight flex items-center gap-2">
                 <span>GreenValley Dairy Farm</span>
                 <span className="text-xs bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 px-2.5 py-0.5 rounded-full font-bold">
-                  {selectedDate === '2026-09-16' ? 'Today (16 Sep 2026)' : selectedDate}
+                  {selectedDate === new Date().toISOString().split('T')[0] ? `Today (${new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })})` : selectedDate}
                 </span>
               </h1>
             </div>
@@ -663,6 +677,7 @@ export default function AdminPage() {
                 customers={customers}
                 products={products}
                 onAddCustomer={handleAddCustomer}
+                onDeleteCustomer={handleDeleteCustomer}
                 onRefresh={loadAdminData}
               />
             )}
@@ -747,7 +762,7 @@ export default function AdminPage() {
                 </span>
               </div>
 
-              <div className="divide-y divide-slate-100 max-h-[600px] overflow-y-auto space-y-1">
+              <div className="divide-y divide-slate-100 max-h-150 overflow-y-auto space-y-1">
                 {activities.length === 0 ? (
                   <p className="text-xs text-slate-400 py-4 text-center">No recent activities</p>
                 ) : (

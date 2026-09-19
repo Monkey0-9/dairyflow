@@ -3,7 +3,7 @@
 Complete in order. Every step must pass before the next. Owner initials each line.
 
 ## 0. Pre-flight (staging)
-- [ ] `npm test` → 204/204 green; `npm run build` → 0 type errors, `ƒ Proxy` present.
+- [ ] `npm test` → 209/209 green; `npm run build` → 0 type errors, `ƒ Proxy` present.
 - [ ] `/api/health` → `HEALTHY`, database `UP` (<2s), outbox `UP`.
 - [ ] `DEMO_LOGIN_ENABLED=false` on production; real FARMER + SUPERADMIN seeded via DB.
 - [ ] Razorpay test keys: create order → pay → webhook `PROCESSED`; retry same

@@ -3,18 +3,24 @@ import type { NextRequest } from 'next/server';
 // Verified HMAC-SHA256 session decoder (Node.js runtime). Unsigned or
 // expired tokens are rejected here; login issues signed expiring tokens.
 import { decodeSession, SESSION_COOKIE_NAME } from './lib/auth';
+import { inspectRequestSecurity, applySecurityHeaders } from './lib/security/firewall';
 
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
+  // 1. Run Security Firewall Payload & Rate Inspection
+  const securityCheck = inspectRequestSecurity(request);
+  if (securityCheck.blocked && securityCheck.response) {
+    return applySecurityHeaders(securityCheck.response);
+  }
+
   // Skip static assets, Next internal files, and public images
   if (
     pathname.startsWith('/_next') ||
-    pathname.startsWith('/api') ||
     pathname.startsWith('/favicon.ico') ||
     pathname.includes('.')
   ) {
-    return NextResponse.next();
+    return applySecurityHeaders(NextResponse.next());
   }
 
   const sessionCookie = request.cookies.get(SESSION_COOKIE_NAME)?.value;
@@ -24,27 +30,27 @@ export function proxy(request: NextRequest) {
   if (pathname === '/login' || pathname === '/register') {
     if (session) {
       if (session.role === 'FARMER') {
-        return NextResponse.redirect(new URL('/admin', request.url));
+        return applySecurityHeaders(NextResponse.redirect(new URL('/admin', request.url)));
       } else if (session.role === 'CUSTOMER') {
-        return NextResponse.redirect(new URL('/customer', request.url));
+        return applySecurityHeaders(NextResponse.redirect(new URL('/customer', request.url)));
       } else if (session.role === 'ADMIN') {
-        return NextResponse.redirect(new URL('/superadmin', request.url));
+        return applySecurityHeaders(NextResponse.redirect(new URL('/superadmin', request.url)));
       }
     }
-    return NextResponse.next();
+    return applySecurityHeaders(NextResponse.next());
   }
 
   // Root route '/'
   if (pathname === '/') {
     if (!session) {
-      return NextResponse.redirect(new URL('/login', request.url));
+      return applySecurityHeaders(NextResponse.redirect(new URL('/login', request.url)));
     }
     if (session.role === 'FARMER') {
-      return NextResponse.redirect(new URL('/admin', request.url));
+      return applySecurityHeaders(NextResponse.redirect(new URL('/admin', request.url)));
     } else if (session.role === 'CUSTOMER') {
-      return NextResponse.redirect(new URL('/customer', request.url));
+      return applySecurityHeaders(NextResponse.redirect(new URL('/customer', request.url)));
     } else {
-      return NextResponse.redirect(new URL('/superadmin', request.url));
+      return applySecurityHeaders(NextResponse.redirect(new URL('/superadmin', request.url)));
     }
   }
 
@@ -53,11 +59,11 @@ export function proxy(request: NextRequest) {
     if (!session) {
       const loginUrl = new URL('/login', request.url);
       loginUrl.searchParams.set('redirect', pathname);
-      return NextResponse.redirect(loginUrl);
+      return applySecurityHeaders(NextResponse.redirect(loginUrl));
     }
     if (session.role === 'CUSTOMER') {
       // Forbidden: Customer trying to access Admin portal -> Redirect to customer portal
-      return NextResponse.redirect(new URL('/customer', request.url));
+      return applySecurityHeaders(NextResponse.redirect(new URL('/customer', request.url)));
     }
   }
 
@@ -66,11 +72,11 @@ export function proxy(request: NextRequest) {
     if (!session) {
       const loginUrl = new URL('/login', request.url);
       loginUrl.searchParams.set('redirect', pathname);
-      return NextResponse.redirect(loginUrl);
+      return applySecurityHeaders(NextResponse.redirect(loginUrl));
     }
     if (session.role === 'FARMER') {
       // Farmer trying to access Customer portal -> Redirect to admin portal
-      return NextResponse.redirect(new URL('/admin', request.url));
+      return applySecurityHeaders(NextResponse.redirect(new URL('/admin', request.url)));
     }
   }
 
@@ -79,18 +85,15 @@ export function proxy(request: NextRequest) {
     if (!session || (session.role !== 'ADMIN' && session.role !== 'SUPERADMIN')) {
       const loginUrl = new URL('/login', request.url);
       loginUrl.searchParams.set('redirect', pathname);
-      return NextResponse.redirect(loginUrl);
+      return applySecurityHeaders(NextResponse.redirect(loginUrl));
     }
   }
 
   const response = NextResponse.next();
-  response.headers.set('X-Content-Type-Options', 'nosniff');
-  response.headers.set('X-Frame-Options', 'DENY');
-  response.headers.set('X-XSS-Protection', '1; mode=block');
-  response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
-  return response;
+  return applySecurityHeaders(response);
 }
 
 export const config = {
   matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
 };
+

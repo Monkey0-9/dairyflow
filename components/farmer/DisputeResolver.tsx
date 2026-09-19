@@ -151,7 +151,7 @@ export default function DisputeResolver({
                         Customer Claim
                       </div>
                       <div className="text-sm font-black text-rose-600 font-mono mt-0.5">
-                        {d.claimedQuantity} Litres ({d.reason.replace(/_/g, ' ')})
+                        {d.claimedQuantity} Litres ({d.reason ? d.reason.replace(/_/g, ' ') : 'General Claim'})
                       </div>
                     </div>
                   </div>
@@ -159,7 +159,7 @@ export default function DisputeResolver({
                   {/* Customer Note */}
                   <div className="mt-3 p-3 bg-amber-50/70 rounded-2xl border border-amber-200 text-xs text-amber-900">
                     <span className="font-bold">Customer Comment: </span>
-                    <span className="italic">"{d.customerNote}"</span>
+                    <span className="italic">&ldquo;{d.customerNote || 'No description provided'}&rdquo;</span>
                   </div>
                 </div>
 

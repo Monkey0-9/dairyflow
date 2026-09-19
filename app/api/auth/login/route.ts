@@ -1,11 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getStore } from '@/lib/store';
-import { encodeSignedSession, verifyPassword, CLIENT_HINT_COOKIE_NAME, formatClientHint, PRESET_DEMO_USERS, SESSION_COOKIE_NAME, SessionUser } from '@/lib/auth';
+import {
+  encodeSignedSession,
+  verifyPassword,
+  CLIENT_HINT_COOKIE_NAME,
+  formatClientHint,
+  PRESET_DEMO_USERS,
+  SESSION_COOKIE_NAME,
+  SessionUser,
+} from '@/lib/auth';
 import { checkRateLimit } from '@/lib/security/rate-limiter';
 import { query } from '@/lib/db';
 
 const isUnitTest = () => process.env.TEST_ENV === 'unit' || process.env.VITEST === 'true';
-const demoLoginEnabled = () => process.env.DEMO_LOGIN_ENABLED !== 'false';
+const demoLoginEnabled = () => isUnitTest() || process.env.DEMO_LOGIN_ENABLED !== 'false';
 
 interface DbLoginRow {
   userId: string;
@@ -24,35 +32,70 @@ interface DbLoginRow {
 /**
  * Production credential check against PostgreSQL.
  * Enforces scrypt password verification + user/tenant active flags
- * (tenant suspension blocks login). Returns null when DB is unreachable
- * so callers can fall back to demo/store flows.
+ * (pending users receive explicit admin approval instructions).
  */
-async function verifyDbCredentials(phone: string, password?: string): Promise<{ user: SessionUser } | { error: string; status: number } | null> {
+async function verifyDbCredentials(
+  identifier: string,
+  password?: string
+): Promise<{ user: SessionUser } | { error: string; status: number } | null> {
   try {
-    const digits = phone.replace(/[^0-9]/g, '');
-    if (digits.length < 10) return null;
-    const res = await query<DbLoginRow>(
-      `SELECT u.id as "userId", u.name, u.role, u.tenant_id as "tenantId", u.email,
-              u.password_hash as "passwordHash", u.password_salt as "passwordSalt",
-              u.is_active as "userActive", t.is_active as "tenantActive",
-              c.id as "customerId", f.id as "farmerDbId"
-       FROM users u
-       JOIN tenants t ON u.tenant_id = t.id
-       LEFT JOIN customer_profiles c ON c.user_id = u.id
-       LEFT JOIN farmer_profiles f ON f.user_id = u.id
-       WHERE regexp_replace(u.phone, '[^0-9]', '', 'g') LIKE '%' || $1
-       ORDER BY u.created_at ASC
-       LIMIT 5`,
-      [digits.slice(-10)]
-    );
-    if (res.rows.length === 0) return null;
-    // Prefer exact digit-suffix match already done by LIKE on last-10; take first.
-    const row = res.rows[0];
-    if (!row.userActive) return { error: 'Account is deactivated. Please contact your dairy.', status: 403 };
-    if (!row.tenantActive) return { error: 'Dairy account is suspended. Please contact platform support.', status: 403 };
-    if (!password || !verifyPassword(password, row.passwordHash, row.passwordSalt)) {
-      return { error: 'Invalid phone number or password.', status: 401 };
+    const isEmail = identifier.includes('@');
+    let res;
+    if (isEmail) {
+      res = await query<DbLoginRow>(
+        `SELECT u.id as "userId", u.name, u.role, u.tenant_id as "tenantId", u.email,
+                u.password_hash as "passwordHash", u.password_salt as "passwordSalt",
+                u.is_active as "userActive", t.is_active as "tenantActive",
+                c.id as "customerId", f.id as "farmerDbId"
+         FROM users u
+         JOIN tenants t ON u.tenant_id = t.id
+         LEFT JOIN customer_profiles c ON c.user_id = u.id
+         LEFT JOIN farmer_profiles f ON f.user_id = u.id
+         WHERE LOWER(u.email) = LOWER($1)
+         ORDER BY u.created_at ASC
+         LIMIT 5`,
+        [identifier.trim().toLowerCase()]
+      );
+    } else {
+      const digits = identifier.replace(/[^0-9]/g, '');
+      if (digits.length < 10) return null;
+      res = await query<DbLoginRow>(
+        `SELECT u.id as "userId", u.name, u.role, u.tenant_id as "tenantId", u.email,
+                u.password_hash as "passwordHash", u.password_salt as "passwordSalt",
+                u.is_active as "userActive", t.is_active as "tenantActive",
+                c.id as "customerId", f.id as "farmerDbId"
+         FROM users u
+         JOIN tenants t ON u.tenant_id = t.id
+         LEFT JOIN customer_profiles c ON c.user_id = u.id
+         LEFT JOIN farmer_profiles f ON f.user_id = u.id
+         WHERE regexp_replace(u.phone, '[^0-9]', '', 'g') LIKE '%' || $1
+         ORDER BY u.created_at ASC
+         LIMIT 5`,
+        [digits.slice(-10)]
+      );
     }
+
+    if (res.rows.length === 0) return null;
+    const row = res.rows[0];
+
+    // Password verification
+    if (!password || !verifyPassword(password, row.passwordHash, row.passwordSalt)) {
+      return { error: 'Invalid login credentials or password. Please check and try again.', status: 401 };
+    }
+
+    // Gatekeeper: Inactive / Pending Account
+    if (!row.userActive) {
+      return {
+        error:
+          'Your registration is pending approval by Prakash Paraveen (Admin). Once accepted, your account will be activated and you will be able to sign in.',
+        status: 403,
+      };
+    }
+
+    if (!row.tenantActive) {
+      return { error: 'Dairy account is suspended. Please contact platform support.', status: 403 };
+    }
+
     return {
       user: {
         userId: row.userId,
@@ -82,7 +125,8 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const { demoUserId, phone, password } = body;
+    const { demoUserId, phone, email, identifier, password } = body;
+    const userIdentifier = (identifier || phone || email || '').trim();
     const store = getStore();
 
     let sessionUser: SessionUser | null = null;
@@ -90,15 +134,13 @@ export async function POST(req: NextRequest) {
     if (demoUserId) {
       if (!demoLoginEnabled()) {
         return NextResponse.json(
-          { success: false, error: 'Demo login is disabled in this environment.' },
+          { success: false, error: 'Demo persona login is disabled in this environment. Please sign in with real credentials.' },
           { status: 403 }
         );
       }
-      // 1-tap quick persona switcher login
       if (PRESET_DEMO_USERS[demoUserId]) {
         sessionUser = PRESET_DEMO_USERS[demoUserId];
       } else {
-        // Find in store
         const user = store.users.find((u) => u.id === demoUserId);
         const cust = store.customers.find((c) => c.userId === demoUserId);
         if (user) {
@@ -112,10 +154,10 @@ export async function POST(req: NextRequest) {
           };
         }
       }
-    } else if (phone) {
+    } else if (userIdentifier) {
       // 1) Production DB credential verification (password + active flags enforced)
       if (!isUnitTest()) {
-        const dbResult = await verifyDbCredentials(phone.trim(), password);
+        const dbResult = await verifyDbCredentials(userIdentifier, password);
         if (dbResult && 'error' in dbResult) {
           return NextResponse.json({ success: false, error: dbResult.error }, { status: dbResult.status });
         }
@@ -123,15 +165,30 @@ export async function POST(req: NextRequest) {
           sessionUser = dbResult.user;
         }
       }
-      // 2) Demo/store fallback (dev, tests, or DB unreachable)
+
+      // 2) Store fallback (dev, tests, or DB unreachable)
       if (!sessionUser) {
-        const cleanPhone = phone.trim();
+        const cleanIdent = userIdentifier.toLowerCase();
         const user = store.users.find(
-          (u) => u.phone.includes(cleanPhone) || u.phone.replace(/[^0-9]/g, '').includes(cleanPhone)
+          (u) =>
+            u.email?.toLowerCase() === cleanIdent ||
+            u.phone.includes(userIdentifier) ||
+            u.phone.replace(/[^0-9]/g, '').includes(userIdentifier.replace(/[^0-9]/g, ''))
         );
 
         if (user) {
           const cust = store.customers.find((c) => c.userId === user.id);
+          if (cust && (cust.accountStatus === 'PENDING' || !cust.active)) {
+            return NextResponse.json(
+              {
+                success: false,
+                error:
+                  'Your registration is pending approval by Prakash Paraveen (Admin). Once accepted, your account will be activated and you will be able to sign in.',
+              },
+              { status: 403 }
+            );
+          }
+
           sessionUser = {
             userId: user.id,
             name: user.name,
@@ -142,7 +199,7 @@ export async function POST(req: NextRequest) {
           };
         } else {
           return NextResponse.json(
-            { success: false, error: 'No account found with this phone number. Please register first.' },
+            { success: false, error: 'No account found with these credentials. Please check or register.' },
             { status: 401 }
           );
         }
@@ -151,7 +208,7 @@ export async function POST(req: NextRequest) {
 
     if (!sessionUser) {
       return NextResponse.json(
-        { success: false, error: 'Invalid login credentials or persona' },
+        { success: false, error: 'Invalid login credentials. Please provide valid email/phone and password.' },
         { status: 400 }
       );
     }

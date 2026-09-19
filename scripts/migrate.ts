@@ -72,7 +72,7 @@ async function migrate() {
       name VARCHAR(255) NOT NULL,
       code VARCHAR(32) NOT NULL,
       unit VARCHAR(16) DEFAULT 'L',
-      price_per_unit NUMERIC(8,2) NOT NULL,
+      price_per_unit NUMERIC(8,2),
       description TEXT,
       is_active BOOLEAN DEFAULT true,
       created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -322,6 +322,215 @@ async function migrate() {
     `CREATE INDEX IF NOT EXISTS idx_pause_requests_farmer ON pause_requests(farmer_id, status);`,
     `CREATE INDEX IF NOT EXISTS idx_extra_requests_farmer ON extra_milk_requests(farmer_id, status);`,
     `ALTER TABLE delivery_records ADD COLUMN IF NOT EXISTS bottles_returned INT DEFAULT 0;`,
+    `ALTER TABLE customer_profiles ADD COLUMN IF NOT EXISTS transfer_status VARCHAR(32) DEFAULT 'NONE';`,
+    `DO $$ BEGIN
+      ALTER TABLE customer_profiles ADD CONSTRAINT check_customer_qty CHECK (daily_quantity >= 0);
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
+    `ALTER TABLE products ALTER COLUMN price_per_unit DROP NOT NULL;`,
+    `DO $$ BEGIN
+      ALTER TABLE products DROP CONSTRAINT IF EXISTS check_product_price;
+      ALTER TABLE products ADD CONSTRAINT check_product_price CHECK (price_per_unit IS NULL OR price_per_unit >= 0);
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
+    `DO $$ BEGIN
+      ALTER TABLE delivery_records ADD CONSTRAINT check_delivery_delivered_qty CHECK (delivered_quantity >= 0);
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
+    `DO $$ BEGIN
+      ALTER TABLE invoices ADD CONSTRAINT check_invoice_total CHECK (total_amount >= 0);
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
+    `DO $$ BEGIN
+      ALTER TABLE payments ADD CONSTRAINT check_payment_amount CHECK (amount > 0);
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
+
+    // 21. Customer Invitations
+    `CREATE TABLE IF NOT EXISTS customer_invitations (
+      id VARCHAR(64) PRIMARY KEY,
+      customer_id VARCHAR(64) UNIQUE NOT NULL REFERENCES customer_profiles(id) ON DELETE CASCADE,
+      token_hash VARCHAR(128) UNIQUE NOT NULL,
+      channel VARCHAR(32) DEFAULT 'SMS',
+      expires_at TIMESTAMPTZ NOT NULL,
+      used_at TIMESTAMPTZ,
+      revoked_at TIMESTAMPTZ,
+      created_by_id VARCHAR(64) NOT NULL,
+      attempt_count INT DEFAULT 0,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );`,
+
+    // 22. Subscription Versions
+    `CREATE TABLE IF NOT EXISTS subscription_versions (
+      id VARCHAR(64) PRIMARY KEY,
+      subscription_id VARCHAR(64) NOT NULL,
+      customer_id VARCHAR(64) NOT NULL REFERENCES customer_profiles(id) ON DELETE CASCADE,
+      product_id VARCHAR(64) NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+      quantity NUMERIC(5,2) NOT NULL,
+      frequency VARCHAR(32) DEFAULT 'DAILY',
+      shift VARCHAR(32) DEFAULT 'MORNING',
+      effective_from TIMESTAMPTZ NOT NULL,
+      effective_to TIMESTAMPTZ,
+      created_by_id VARCHAR(64) NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );`,
+
+    // 23. Product Price Histories
+    `CREATE TABLE IF NOT EXISTS product_price_histories (
+      id VARCHAR(64) PRIMARY KEY,
+      product_id VARCHAR(64) NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+      price_per_unit NUMERIC(8,2) NOT NULL,
+      effective_from TIMESTAMPTZ NOT NULL,
+      effective_to TIMESTAMPTZ,
+      created_by_id VARCHAR(64) NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );`,
+
+    // 24. Customer Transfer Requests
+    `CREATE TABLE IF NOT EXISTS customer_transfer_requests (
+      id VARCHAR(64) PRIMARY KEY,
+      customer_id VARCHAR(64) NOT NULL REFERENCES customer_profiles(id) ON DELETE CASCADE,
+      from_farmer_id VARCHAR(64) NOT NULL,
+      to_farmer_id VARCHAR(64) NOT NULL,
+      status VARCHAR(32) DEFAULT 'PENDING',
+      reason TEXT,
+      effective_date TIMESTAMPTZ NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      resolved_at TIMESTAMPTZ
+    );`,
+
+    // 25. Invoice Adjustments
+    `CREATE TABLE IF NOT EXISTS invoice_adjustments (
+      id VARCHAR(64) PRIMARY KEY,
+      invoice_id VARCHAR(64) NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
+      type VARCHAR(32) NOT NULL,
+      amount NUMERIC(10,2) NOT NULL,
+      reason TEXT NOT NULL,
+      authorized_by VARCHAR(64) NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );`,
+
+    // 26. Month Closings
+    `CREATE TABLE IF NOT EXISTS month_closings (
+      id VARCHAR(64) PRIMARY KEY,
+      tenant_id VARCHAR(64) NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+      farmer_id VARCHAR(64) NOT NULL REFERENCES farmer_profiles(id) ON DELETE CASCADE,
+      month INT NOT NULL,
+      year INT NOT NULL,
+      status VARCHAR(32) DEFAULT 'FINALIZED',
+      closed_by VARCHAR(64) NOT NULL,
+      closed_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(farmer_id, month, year)
+    );`,
+
+    // 27. Routes & Route Stops
+    `CREATE TABLE IF NOT EXISTS routes (
+      id VARCHAR(64) PRIMARY KEY,
+      tenant_id VARCHAR(64) NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+      farmer_id VARCHAR(64) NOT NULL REFERENCES farmer_profiles(id) ON DELETE CASCADE,
+      name VARCHAR(255) NOT NULL,
+      code VARCHAR(64) NOT NULL,
+      shift VARCHAR(32) DEFAULT 'MORNING',
+      agent_user_id VARCHAR(64),
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );`,
+
+    `CREATE TABLE IF NOT EXISTS route_stops (
+      id VARCHAR(64) PRIMARY KEY,
+      route_id VARCHAR(64) NOT NULL REFERENCES routes(id) ON DELETE CASCADE,
+      customer_id VARCHAR(64) NOT NULL REFERENCES customer_profiles(id) ON DELETE CASCADE,
+      stop_sequence INT NOT NULL,
+      UNIQUE(route_id, customer_id)
+    );`,
+
+    // 28. Customer Merge Logs
+    `CREATE TABLE IF NOT EXISTS customer_merge_logs (
+      id VARCHAR(64) PRIMARY KEY,
+      primary_customer_id VARCHAR(64) NOT NULL,
+      merged_customer_id VARCHAR(64) NOT NULL,
+      performed_by VARCHAR(64) NOT NULL,
+      merged_at TIMESTAMPTZ DEFAULT NOW()
+    );`,
+
+    // 29. Operation Logs (Idempotency)
+    `CREATE TABLE IF NOT EXISTS operation_logs (
+      id VARCHAR(64) PRIMARY KEY,
+      operation_id VARCHAR(128) UNIQUE NOT NULL,
+      action VARCHAR(128) NOT NULL,
+      actor_id VARCHAR(64) NOT NULL,
+      result_json TEXT NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );`,
+
+    // 30. Database as Final Security Boundary: CHECK constraints.
+    // Idempotent DO blocks: existing deployments gain constraints without failing on re-run.
+    `DO $$ BEGIN
+      ALTER TABLE customer_profiles ADD CONSTRAINT chk_customer_daily_qty CHECK (daily_quantity >= 0);
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
+    `DO $$ BEGIN
+      ALTER TABLE products ADD CONSTRAINT chk_product_price CHECK (price_per_unit >= 0);
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
+    `DO $$ BEGIN
+      ALTER TABLE subscriptions ADD CONSTRAINT chk_subscription_qty CHECK (quantity >= 0);
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
+    `DO $$ BEGIN
+      ALTER TABLE delivery_records ADD CONSTRAINT chk_delivery_scheduled_qty CHECK (scheduled_quantity >= 0);
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
+    `DO $$ BEGIN
+      ALTER TABLE delivery_records ADD CONSTRAINT chk_delivery_delivered_qty CHECK (delivered_quantity >= 0);
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
+    `DO $$ BEGIN
+      ALTER TABLE delivery_records ADD CONSTRAINT chk_delivery_price CHECK (price_per_unit >= 0);
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
+    `DO $$ BEGIN
+      ALTER TABLE invoices ADD CONSTRAINT chk_invoice_total_amount CHECK (total_amount >= 0);
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
+    `DO $$ BEGIN
+      ALTER TABLE invoices ADD CONSTRAINT chk_invoice_paid_amount CHECK (paid_amount >= 0);
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
+    `DO $$ BEGIN
+      ALTER TABLE invoices ADD CONSTRAINT chk_invoice_outstanding CHECK (outstanding_amount >= 0);
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
+    `DO $$ BEGIN
+      ALTER TABLE invoices ADD CONSTRAINT chk_invoice_total_qty CHECK (total_quantity >= 0);
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
+    `DO $$ BEGIN
+      ALTER TABLE invoices ADD CONSTRAINT chk_invoice_month CHECK (month BETWEEN 1 AND 12);
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
+    `DO $$ BEGIN
+      ALTER TABLE invoice_items ADD CONSTRAINT chk_item_qty CHECK (quantity >= 0);
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
+    `DO $$ BEGIN
+      ALTER TABLE payments ADD CONSTRAINT chk_payment_amount CHECK (amount > 0);
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
+    `DO $$ BEGIN
+      ALTER TABLE inventory_records ADD CONSTRAINT chk_inv_production CHECK (production_quantity >= 0);
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
+    `DO $$ BEGIN
+      ALTER TABLE inventory_records ADD CONSTRAINT chk_inv_delivered CHECK (delivered_quantity >= 0);
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
+    `DO $$ BEGIN
+      ALTER TABLE inventory_records ADD CONSTRAINT chk_inv_waste CHECK (waste_quantity >= 0);
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
+    `DO $$ BEGIN
+      ALTER TABLE inventory_records ADD CONSTRAINT chk_inv_personal CHECK (personal_quantity >= 0);
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
+    `DO $$ BEGIN
+      ALTER TABLE inventory_records ADD CONSTRAINT chk_inv_opening CHECK (opening_stock >= 0);
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
+    `DO $$ BEGIN
+      ALTER TABLE inventory_records ADD CONSTRAINT chk_inv_closing CHECK (closing_stock >= 0);
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
+    `DO $$ BEGIN
+      ALTER TABLE subscription_versions ADD CONSTRAINT chk_subver_qty CHECK (quantity >= 0);
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
+    `DO $$ BEGIN
+      ALTER TABLE product_price_histories ADD CONSTRAINT chk_price_hist CHECK (price_per_unit >= 0);
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
+    `DO $$ BEGIN
+      ALTER TABLE invoice_adjustments ADD CONSTRAINT chk_adj_amount CHECK (amount >= 0);
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
+    `DO $$ BEGIN
+      ALTER TABLE extra_milk_requests ADD CONSTRAINT chk_extra_qty CHECK (quantity >= 0);
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
+    `DO $$ BEGIN
+      ALTER TABLE quantity_change_requests ADD CONSTRAINT chk_qc_qty CHECK (new_quantity >= 0);
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
   ];
 
   for (const ddl of ddlStatements) {

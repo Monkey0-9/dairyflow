@@ -10,16 +10,20 @@ import {
   Clock,
   Droplets,
   QrCode,
-  Calendar,
   X,
   Printer,
   CheckCircle2,
-  AlertTriangle,
-  FileText,
-  CreditCard,
   ChevronRight,
-  ShieldCheck,
-  User,
+  Mail,
+  Trash2,
+  Key,
+  Copy,
+  Check,
+  Eye,
+  EyeOff,
+  Sparkles,
+  Edit2,
+  Save,
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import { CustomerProfile, Product, Subscription, Invoice, AccountStatus } from '@/lib/types';
@@ -32,7 +36,8 @@ interface CustomerWithSub extends CustomerProfile {
 interface CustomerManagementProps {
   customers: CustomerWithSub[];
   products: Product[];
-  onAddCustomer: (data: any) => Promise<void>;
+  onAddCustomer: (data: any) => Promise<any>;
+  onDeleteCustomer?: (customerId: string) => Promise<any>;
   onRefresh: () => void;
 }
 
@@ -40,6 +45,7 @@ export default function CustomerManagement({
   customers,
   products,
   onAddCustomer,
+  onDeleteCustomer,
   onRefresh,
 }: CustomerManagementProps) {
   const [searchQuery, setSearchQuery] = useState('');
@@ -47,13 +53,27 @@ export default function CustomerManagement({
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedCustForQR, setSelectedCustForQR] = useState<CustomerWithSub | null>(null);
   const [selectedCust360, setSelectedCust360] = useState<CustomerWithSub | null>(null);
+  const [customerToDelete, setCustomerToDelete] = useState<CustomerWithSub | null>(null);
+  const [editingCustomer, setEditingCustomer] = useState<CustomerWithSub | null>(null);
+  const [createdCredentials, setCreatedCredentials] = useState<{
+    name: string;
+    email: string;
+    phone: string;
+    temporaryPassword: string;
+    loginUrl: string;
+  } | null>(null);
+  const [copiedCredentials, setCopiedCredentials] = useState(false);
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSubmittingEdit, setIsSubmittingEdit] = useState(false);
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
 
   // New Customer Form State
   const [newName, setNewName] = useState('');
   const [newPhone, setNewPhone] = useState('');
+  const [newEmail, setNewEmail] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [newAddress, setNewAddress] = useState('');
   const [newProductId, setNewProductId] = useState(products[0]?.id || 'prod_cow_milk');
   const [newQuantity, setNewQuantity] = useState('1.0');
@@ -62,19 +82,32 @@ export default function CustomerManagement({
   const [newShift, setNewShift] = useState<'MORNING' | 'EVENING' | 'BOTH'>('MORNING');
   const [newNotes, setNewNotes] = useState('');
 
+  // Edit Customer Form State
+  const [editName, setEditName] = useState('');
+  const [editPhone, setEditPhone] = useState('');
+  const [editEmail, setEditEmail] = useState('');
+  const [editAddress, setEditAddress] = useState('');
+  const [editProductId, setEditProductId] = useState('');
+  const [editQuantity, setEditQuantity] = useState('1.0');
+  const [editCustomPrice, setEditCustomPrice] = useState('');
+  const [editTime, setEditTime] = useState('06:30 AM');
+  const [editShift, setEditShift] = useState<'MORNING' | 'EVENING' | 'BOTH'>('MORNING');
+  const [editStatus, setEditStatus] = useState<AccountStatus>('ACTIVE');
+  const [editNotes, setEditNotes] = useState('');
+
   // Filter customers by search and accountStatus
   const filteredCustomers = customers.filter((c) => {
     const matchesSearch =
       c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       c.phone.includes(searchQuery) ||
+      (c.email && c.email.toLowerCase().includes(searchQuery.toLowerCase())) ||
       c.customerCode.toLowerCase().includes(searchQuery.toLowerCase());
     if (!matchesSearch) return false;
 
     if (statusFilter === 'ALL') return true;
     if (statusFilter === 'ACTIVE') return c.accountStatus === 'ACTIVE';
     if (statusFilter === 'PENDING') return c.accountStatus === 'PENDING';
-    if (statusFilter === 'PAUSED') return c.accountStatus === 'PAUSED';
-    if (statusFilter === 'DISPUTED') return c.notes?.toLowerCase().includes('dispute') || c.id === 'cust_anand';
+    if (statusFilter === 'DISPUTED') return Boolean(c.notes?.toLowerCase().includes('dispute'));
     return true;
   });
 
@@ -103,9 +136,11 @@ export default function CustomerManagement({
     if (!newName || !newPhone || !newQuantity) return;
     setIsSubmitting(true);
     try {
-      await onAddCustomer({
+      const res = await onAddCustomer({
         name: newName,
         phone: newPhone,
+        email: newEmail.trim() || undefined,
+        password: newPassword.trim() || undefined,
         address: newAddress,
         productId: newProductId,
         quantity: parseFloat(newQuantity),
@@ -115,13 +150,122 @@ export default function CustomerManagement({
         notes: newNotes,
       });
       setShowAddModal(false);
+
+      if (res?.credentials) {
+        setCreatedCredentials({
+          name: newName,
+          email: res.credentials.email,
+          phone: res.credentials.phone,
+          temporaryPassword: res.credentials.temporaryPassword,
+          loginUrl: '/login',
+        });
+      }
+
       // reset
       setNewName('');
       setNewPhone('');
+      setNewEmail('');
+      setNewPassword('');
       setNewAddress('');
       setNewQuantity('1.0');
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleStartEditCustomer = (c: CustomerWithSub) => {
+    setEditingCustomer(c);
+    setEditName(c.name || '');
+    setEditPhone(c.phone || '');
+    setEditEmail(c.email || '');
+    setEditAddress(c.address || '');
+    setEditProductId(c.subscription?.productId || products[0]?.id || 'prod_cow_milk');
+    setEditQuantity(c.subscription?.defaultQuantity ? String(c.subscription.defaultQuantity) : '1.0');
+    setEditCustomPrice(c.subscription?.customPricePerUnit ? String(c.subscription.customPricePerUnit) : '');
+    setEditTime(c.deliveryTime || '06:30 AM');
+    setEditShift(c.deliveryShift || 'MORNING');
+    setEditStatus(c.accountStatus || 'ACTIVE');
+    setEditNotes(c.notes || '');
+  };
+
+  const handleSaveEditCustomer = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingCustomer || !editName || !editPhone) return;
+    setIsSubmittingEdit(true);
+    try {
+      const res = await fetch('/api/customers', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          customerId: editingCustomer.id,
+          name: editName.trim(),
+          phone: editPhone.trim(),
+          email: editEmail.trim() || undefined,
+          address: editAddress.trim(),
+          productId: editProductId,
+          quantity: parseFloat(editQuantity) || 1.0,
+          customPrice: editCustomPrice ? parseFloat(editCustomPrice) : undefined,
+          deliveryTime: editTime,
+          deliveryShift: editShift,
+          status: editStatus,
+          notes: editNotes.trim() || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        onRefresh();
+        setEditingCustomer(null);
+        if (selectedCust360?.id === editingCustomer.id) {
+          setSelectedCust360((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  name: editName.trim(),
+                  phone: editPhone.trim(),
+                  email: editEmail.trim() || undefined,
+                  address: editAddress.trim(),
+                  deliveryTime: editTime,
+                  deliveryShift: editShift,
+                  accountStatus: editStatus,
+                  subscription: prev.subscription
+                    ? {
+                        ...prev.subscription,
+                        productId: editProductId,
+                        defaultQuantity: parseFloat(editQuantity) || 1.0,
+                        customPricePerUnit: editCustomPrice ? parseFloat(editCustomPrice) : prev.subscription.customPricePerUnit,
+                        productName: products.find((p) => p.id === editProductId)?.name || prev.subscription.productName,
+                      }
+                    : undefined,
+                }
+              : null
+          );
+        }
+      }
+    } catch (err) {
+      console.error('Failed to update customer:', err);
+    } finally {
+      setIsSubmittingEdit(false);
+    }
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!customerToDelete) return;
+    setActionLoadingId(customerToDelete.id);
+    try {
+      if (onDeleteCustomer) {
+        await onDeleteCustomer(customerToDelete.id);
+      } else {
+        await fetch(`/api/customers?id=${customerToDelete.id}`, { method: 'DELETE' });
+        onRefresh();
+      }
+      if (selectedCust360?.id === customerToDelete.id) {
+        setSelectedCust360(null);
+      }
+      setCustomerToDelete(null);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setActionLoadingId(null);
     }
   };
 
@@ -266,9 +410,23 @@ export default function CustomerManagement({
                         <Phone className="w-3.5 h-3.5 text-slate-400" />
                         <span>{c.phone}</span>
                       </div>
+                      {c.email && (
+                        <div className="text-[11px] text-slate-500 flex items-center gap-1 mt-0.5 font-mono">
+                          <Mail className="w-3.5 h-3.5 text-emerald-600" />
+                          <span className="truncate max-w-42.5">{c.email}</span>
+                        </div>
+                      )}
                     </div>
 
                     <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => handleStartEditCustomer(c)}
+                        className="p-2 rounded-xl border border-blue-200 hover:bg-blue-50 text-blue-600 hover:text-blue-800 transition cursor-pointer"
+                        title="Edit Customer Details & Subscription"
+                      >
+                        <Edit2 className="w-4 h-4" />
+                      </button>
+
                       <button
                         onClick={() => setSelectedCustForQR(c)}
                         className="p-2 rounded-xl border border-slate-200 hover:bg-emerald-50 text-slate-600 hover:text-emerald-700 transition cursor-pointer"
@@ -283,6 +441,14 @@ export default function CustomerManagement({
                         title="View Customer 360"
                       >
                         360 View
+                      </button>
+
+                      <button
+                        onClick={() => setCustomerToDelete(c)}
+                        className="p-2 rounded-xl border border-rose-200 hover:bg-rose-50 text-rose-500 hover:text-rose-700 transition cursor-pointer"
+                        title="Remove / Delete Customer"
+                      >
+                        <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
                   </div>
@@ -399,7 +565,7 @@ export default function CustomerManagement({
                       {selectedCust360.customerCode}
                     </span>
                   </div>
-                  <p className="text-xs text-slate-500">{selectedCust360.phone} • {selectedCust360.address}</p>
+                  <p className="text-xs text-slate-500">{selectedCust360.phone} {selectedCust360.email ? `• ${selectedCust360.email}` : ''} • {selectedCust360.address}</p>
                 </div>
               </div>
 
@@ -466,7 +632,7 @@ export default function CustomerManagement({
                 </div>
               </div>
 
-              {/* Monthly Consumption Breakdown (Requirement #9) */}
+              {/* Monthly Consumption Breakdown */}
               <div>
                 <h4 className="font-extrabold text-slate-900 text-xs mb-2">Historical Milk Consumption</h4>
                 <div className="grid grid-cols-4 gap-2 text-center">
@@ -517,18 +683,44 @@ export default function CustomerManagement({
               </div>
 
               {/* Action Buttons */}
-              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-100 flex-wrap">
                 <button
                   onClick={() => {
                     const c = selectedCust360;
                     setSelectedCust360(null);
-                    setSelectedCustForQR(c);
+                    setCustomerToDelete(c);
                   }}
-                  className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer"
+                  className="px-4 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer border border-rose-200"
                 >
-                  <QrCode className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Door QR Card</span>
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Remove Client</span>
                 </button>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      const c = selectedCust360;
+                      setSelectedCust360(null);
+                      handleStartEditCustomer(c);
+                    }}
+                    className="px-4 py-2 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer border border-blue-200"
+                  >
+                    <Edit2 className="w-3.5 h-3.5" />
+                    <span>Edit Profile & Plan</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      const c = selectedCust360;
+                      setSelectedCust360(null);
+                      setSelectedCustForQR(c);
+                    }}
+                    className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <QrCode className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Door QR Card</span>
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -581,15 +773,124 @@ export default function CustomerManagement({
         </div>
       )}
 
+      {/* Delete Customer Confirmation Modal */}
+      {customerToDelete && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl border border-rose-200 overflow-hidden p-6 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-extrabold text-base text-slate-900">Remove Client</h3>
+                <p className="text-xs text-slate-500">Deactivate customer and cancel daily milk subscriptions</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-600 leading-relaxed bg-rose-50/70 p-3.5 rounded-2xl border border-rose-100">
+              Are you sure you want to remove <strong>{customerToDelete.name}</strong> ({customerToDelete.customerCode}, {customerToDelete.phone})? This will immediately remove them from the active daily delivery route.
+            </p>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                onClick={() => setCustomerToDelete(null)}
+                className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmDelete}
+                disabled={actionLoadingId === customerToDelete.id}
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold cursor-pointer transition shadow-xs flex items-center gap-1.5"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{actionLoadingId === customerToDelete.id ? 'Removing...' : 'Yes, Remove Client'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Created Credentials Modal */}
+      {createdCredentials && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl border border-emerald-200 overflow-hidden p-6 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center">
+                <CheckCircle2 className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-extrabold text-base text-slate-900">Client Added Successfully!</h3>
+                <p className="text-xs text-emerald-700 font-semibold">Login credentials generated for client portal</p>
+              </div>
+            </div>
+
+            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-2.5 text-xs font-mono">
+              <div className="flex justify-between border-b border-slate-200/60 pb-1.5">
+                <span className="text-slate-500 font-sans font-bold">Client Name:</span>
+                <span className="text-slate-900 font-bold">{createdCredentials.name}</span>
+              </div>
+              <div className="flex justify-between border-b border-slate-200/60 pb-1.5">
+                <span className="text-slate-500 font-sans font-bold">Email / Login ID:</span>
+                <span className="text-emerald-700 font-bold">{createdCredentials.email}</span>
+              </div>
+              <div className="flex justify-between border-b border-slate-200/60 pb-1.5">
+                <span className="text-slate-500 font-sans font-bold">Mobile Phone:</span>
+                <span className="text-slate-900 font-bold">{createdCredentials.phone}</span>
+              </div>
+              <div className="flex justify-between border-b border-slate-200/60 pb-1.5">
+                <span className="text-slate-500 font-sans font-bold">Starting Password:</span>
+                <span className="text-rose-600 font-extrabold bg-rose-50 px-2 py-0.5 rounded border border-rose-200">
+                  {createdCredentials.temporaryPassword}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500 font-sans font-bold">Portal URL:</span>
+                <span className="text-blue-600 underline">/login</span>
+              </div>
+            </div>
+
+            <p className="text-[11px] text-slate-500 leading-relaxed">
+              The client can immediately sign in using their <strong>Email</strong> or <strong>Mobile Number</strong> with this password, view daily deliveries, pause schedules, and pay monthly invoices.
+            </p>
+
+            <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-100">
+              <button
+                onClick={() => {
+                  const text = `GreenValley Dairy Login Credentials:\nEmail: ${createdCredentials.email}\nPhone: ${createdCredentials.phone}\nPassword: ${createdCredentials.temporaryPassword}\nLogin Portal: ${window.location.origin}/login`;
+                  navigator.clipboard.writeText(text);
+                  setCopiedCredentials(true);
+                  setTimeout(() => setCopiedCredentials(false), 3000);
+                }}
+                className="px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs flex items-center gap-1.5 transition cursor-pointer"
+              >
+                {copiedCredentials ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                <span>{copiedCredentials ? 'Credentials Copied!' : 'Copy Login Details'}</span>
+              </button>
+
+              <button
+                onClick={() => setCreatedCredentials(null)}
+                className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs cursor-pointer transition"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Add Customer Modal */}
       {showAddModal && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
           <div className="bg-white w-full max-w-lg rounded-3xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[90vh]">
             <div className="p-6 border-b border-slate-100 flex items-center justify-between">
-              <h3 className="font-extrabold text-base text-slate-900">Add New Milk Subscriber</h3>
+              <div>
+                <h3 className="font-extrabold text-base text-slate-900">Add New Milk Subscriber</h3>
+                <p className="text-xs text-slate-500">Configure profile, subscription, and instant login access</p>
+              </div>
               <button
                 onClick={() => setShowAddModal(false)}
-                className="p-1 rounded-xl text-slate-400 hover:text-slate-700"
+                className="p-1 rounded-xl text-slate-400 hover:text-slate-700 cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -597,7 +898,7 @@ export default function CustomerManagement({
 
             <form onSubmit={handleSubmitNewCustomer} className="p-6 overflow-y-auto space-y-4 text-xs">
               <div>
-                <label className="block font-bold text-slate-700 mb-1">Full Name</label>
+                <label className="block font-bold text-slate-700 mb-1">Full Name *</label>
                 <input
                   type="text"
                   required
@@ -608,20 +909,68 @@ export default function CustomerManagement({
                 />
               </div>
 
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">Mobile Phone Number</label>
-                <input
-                  type="tel"
-                  required
-                  value={newPhone}
-                  onChange={(e) => setNewPhone(e.target.value)}
-                  placeholder="e.g. +91 98234 56789"
-                  className="w-full px-3.5 py-2 rounded-xl border border-slate-200 focus:outline-none focus:border-emerald-500 bg-slate-50 focus:bg-white transition"
-                />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Mobile Phone Number *</label>
+                  <input
+                    type="tel"
+                    required
+                    value={newPhone}
+                    onChange={(e) => setNewPhone(e.target.value)}
+                    placeholder="e.g. +91 98234 56789"
+                    className="w-full px-3.5 py-2 rounded-xl border border-slate-200 focus:outline-none focus:border-emerald-500 bg-slate-50 focus:bg-white transition"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Email Address (For Easy Login)</label>
+                  <input
+                    type="email"
+                    value={newEmail}
+                    onChange={(e) => setNewEmail(e.target.value)}
+                    placeholder="e.g. ramesh@gmail.com"
+                    className="w-full px-3.5 py-2 rounded-xl border border-slate-200 focus:outline-none focus:border-emerald-500 bg-slate-50 focus:bg-white transition"
+                  />
+                </div>
+              </div>
+
+              {/* Starting Password Setup */}
+              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="font-bold text-slate-700 flex items-center gap-1.5">
+                    <Key className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Starting Login Password</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setNewPassword(`Milk#${Math.floor(1000 + Math.random() * 9000)}`)}
+                    className="text-[11px] font-bold text-emerald-700 hover:text-emerald-800 flex items-center gap-1 cursor-pointer"
+                  >
+                    <Sparkles className="w-3 h-3" />
+                    <span>Auto-Generate</span>
+                  </button>
+                </div>
+                <div className="relative">
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder="e.g. Milk#2026 (Leave empty to auto-generate)"
+                    className="w-full px-3 py-2 pr-10 rounded-xl border border-slate-200 bg-white font-mono text-xs focus:outline-none focus:border-emerald-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                  >
+                    {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+                <p className="text-[10px] text-slate-500">The client can change this password upon initial login.</p>
               </div>
 
               <div>
-                <label className="block font-bold text-slate-700 mb-1">Complete Address</label>
+                <label className="block font-bold text-slate-700 mb-1">Complete Address *</label>
                 <textarea
                   rows={2}
                   required
@@ -642,7 +991,7 @@ export default function CustomerManagement({
                   >
                     {products.map((p) => (
                       <option key={p.id} value={p.id}>
-                        {p.name} (₹{p.basePrice}/L)
+                        {p.name} ({p.basePrice !== null ? `₹${p.basePrice}/${p.unit}` : 'Dynamic Rate'})
                       </option>
                     ))}
                   </select>
@@ -688,13 +1037,234 @@ export default function CustomerManagement({
                 </div>
               </div>
 
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Delivery Shift</label>
+                  <select
+                    value={newShift}
+                    onChange={(e) => setNewShift(e.target.value as 'MORNING' | 'EVENING' | 'BOTH')}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 text-xs font-semibold"
+                  >
+                    <option value="MORNING">MORNING</option>
+                    <option value="EVENING">EVENING</option>
+                    <option value="BOTH">BOTH</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Notes / Door Instructions</label>
+                  <input
+                    type="text"
+                    value={newNotes}
+                    onChange={(e) => setNewNotes(e.target.value)}
+                    placeholder="e.g. Ring bell, leave on doorstep"
+                    className="w-full px-3.5 py-2 rounded-xl border border-slate-200 bg-slate-50 text-xs"
+                  />
+                </div>
+              </div>
+
               <button
                 type="submit"
                 disabled={isSubmitting}
                 className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-xs transition active:scale-98 cursor-pointer"
               >
-                <span>{isSubmitting ? 'Creating...' : 'Create Customer & Subscription'}</span>
+                <span>{isSubmitting ? 'Creating Customer & Credentials...' : 'Create Customer & Generate Login'}</span>
               </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Customer Modal */}
+      {editingCustomer && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-white w-full max-w-lg rounded-3xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center">
+                  <Edit2 className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-base text-slate-900">Edit Present Client Profile</h3>
+                  <p className="text-xs text-slate-500 font-mono">
+                    {editingCustomer.customerCode} • {editingCustomer.name}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setEditingCustomer(null)}
+                className="p-1 rounded-xl text-slate-400 hover:text-slate-700 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEditCustomer} className="p-6 overflow-y-auto space-y-4 text-xs">
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Full Name *</label>
+                <input
+                  type="text"
+                  required
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  placeholder="e.g. Ramesh Chandra"
+                  className="w-full px-3.5 py-2 rounded-xl border border-slate-200 focus:outline-none focus:border-blue-500 bg-slate-50 focus:bg-white transition"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Mobile Phone Number *</label>
+                  <input
+                    type="tel"
+                    required
+                    value={editPhone}
+                    onChange={(e) => setEditPhone(e.target.value)}
+                    placeholder="e.g. +91 98234 56789"
+                    className="w-full px-3.5 py-2 rounded-xl border border-slate-200 focus:outline-none focus:border-blue-500 bg-slate-50 focus:bg-white transition"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Email Address (Login ID)</label>
+                  <input
+                    type="email"
+                    value={editEmail}
+                    onChange={(e) => setEditEmail(e.target.value)}
+                    placeholder="e.g. ramesh@gmail.com"
+                    className="w-full px-3.5 py-2 rounded-xl border border-slate-200 focus:outline-none focus:border-blue-500 bg-slate-50 focus:bg-white transition"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Delivery Address *</label>
+                <textarea
+                  rows={2}
+                  required
+                  value={editAddress}
+                  onChange={(e) => setEditAddress(e.target.value)}
+                  placeholder="Complete Delivery Address"
+                  className="w-full px-3.5 py-2 rounded-xl border border-slate-200 focus:outline-none focus:border-blue-500 bg-slate-50 focus:bg-white transition"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Milk Product</label>
+                  <select
+                    value={editProductId}
+                    onChange={(e) => setEditProductId(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 text-xs font-semibold"
+                  >
+                    {products.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} ({p.basePrice !== null ? `₹${p.basePrice}/${p.unit}` : 'Dynamic Rate'})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Daily Litres</label>
+                  <select
+                    value={editQuantity}
+                    onChange={(e) => setEditQuantity(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 text-xs font-semibold"
+                  >
+                    <option value="0.5">0.5 L</option>
+                    <option value="1.0">1.0 L</option>
+                    <option value="1.5">1.5 L</option>
+                    <option value="2.0">2.0 L</option>
+                    <option value="2.5">2.5 L</option>
+                    <option value="3.0">3.0 L</option>
+                    <option value="4.0">4.0 L</option>
+                    <option value="5.0">5.0 L</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Custom Rate (₹/Litre)</label>
+                  <input
+                    type="number"
+                    value={editCustomPrice}
+                    onChange={(e) => setEditCustomPrice(e.target.value)}
+                    placeholder="Leave empty for standard base price"
+                    className="w-full px-3.5 py-2 rounded-xl border border-slate-200 bg-slate-50 text-xs"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Account Status</label>
+                  <select
+                    value={editStatus}
+                    onChange={(e) => setEditStatus(e.target.value as AccountStatus)}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 text-xs font-semibold"
+                  >
+                    <option value="ACTIVE">ACTIVE (Active Delivery)</option>
+                    <option value="PAUSED">PAUSED (Paused Delivery)</option>
+                    <option value="SUSPENDED">SUSPENDED</option>
+                    <option value="PENDING">PENDING</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Delivery Time</label>
+                  <input
+                    type="text"
+                    value={editTime}
+                    onChange={(e) => setEditTime(e.target.value)}
+                    placeholder="06:30 AM"
+                    className="w-full px-3.5 py-2 rounded-xl border border-slate-200 bg-slate-50 text-xs"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Shift</label>
+                  <select
+                    value={editShift}
+                    onChange={(e) => setEditShift(e.target.value as 'MORNING' | 'EVENING' | 'BOTH')}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 text-xs font-semibold"
+                  >
+                    <option value="MORNING">MORNING</option>
+                    <option value="EVENING">EVENING</option>
+                    <option value="BOTH">BOTH</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Notes / Preferences</label>
+                <input
+                  type="text"
+                  value={editNotes}
+                  onChange={(e) => setEditNotes(e.target.value)}
+                  placeholder="e.g. Ring bell twice, leave on doorstep bag"
+                  className="w-full px-3.5 py-2 rounded-xl border border-slate-200 bg-slate-50 text-xs"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setEditingCustomer(null)}
+                  className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingEdit}
+                  className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs transition cursor-pointer"
+                >
+                  <Save className="w-4 h-4" />
+                  <span>{isSubmittingEdit ? 'Saving Changes...' : 'Save Customer Changes'}</span>
+                </button>
+              </div>
             </form>
           </div>
         </div>

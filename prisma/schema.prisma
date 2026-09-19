@@ -92,16 +92,21 @@ model CustomerProfile {
   farmerId        String   // Crucial relation: Customer belongs to a specific Farmer!
   deliveryAddress String
   milkType        String   @default("Cow") // 'Cow' | 'Buffalo' | 'A2'
+  /// CHECK (daily_quantity >= 0) enforced in PostgreSQL via scripts/migrate.ts
   dailyQuantity   Float    @default(1.0)
   qrToken         String   @unique
   isActive        Boolean  @default(true)
+  status          String   @default("INVITED") // 'INVITED' | 'ACTIVE' | 'SUSPENDED' | 'CLOSED'
+  transferStatus  String   @default("NONE")    // 'NONE' | 'REQUESTED' | 'APPROVED' | 'ACCEPTED' | 'REJECTED' | 'CANCELLED'
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
   user                  User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
   tenant                Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   farmer                FarmerProfile           @relation(fields: [farmerId], references: [id], onDelete: Cascade)
+  invitation            CustomerInvitation?
   subscriptions         Subscription[]
+  subscriptionVersions  SubscriptionVersion[]
   deliveryRecords       DeliveryRecord[]
   pauseRequests         PauseRequest[]
   extraMilkRequests     ExtraMilkRequest[]
@@ -110,6 +115,7 @@ model CustomerProfile {
   invoices              Invoice[]
   payments              Payment[]
   qrIdentity            QRIdentity?
+  routeStops            RouteStop[]
 
   @@map("customer_profiles")
 }
@@ -124,7 +130,8 @@ model Product {
   name         String
   code         String   // 'COW' | 'BUFFALO' | 'A2'
   unit         String   @default("L")
-  pricePerUnit Float
+  /// CHECK (price_per_unit IS NULL OR price_per_unit >= 0) enforced in PostgreSQL via scripts/migrate.ts
+  pricePerUnit Float?
   description  String?
   isActive     Boolean  @default(true)
   createdAt    DateTime @default(now())
@@ -133,6 +140,7 @@ model Product {
   tenant          Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   subscriptions   Subscription[]
   deliveryRecords DeliveryRecord[]
+  priceHistories  ProductPriceHistory[]
 
   @@unique([tenantId, code])
   @@map("products")
@@ -292,6 +300,8 @@ model Invoice {
   farmerId          String
   month             Int
   year              Int
+  /// CHECK (total_quantity >= 0 AND total_amount >= 0 AND paid_amount >= 0 AND outstanding_amount >= 0)
+  /// CHECK (month BETWEEN 1 AND 12) enforced in PostgreSQL via scripts/migrate.ts
   totalQuantity     Float
   totalAmount       Float
   paidAmount        Float         @default(0)
@@ -301,10 +311,11 @@ model Invoice {
   createdAt         DateTime      @default(now())
   updatedAt         DateTime      @updatedAt
 
-  tenant   Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  customer CustomerProfile @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  items    InvoiceItem[]
-  payments Payment[]
+  tenant      Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer    CustomerProfile     @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  items       InvoiceItem[]
+  payments    Payment[]
+  adjustments InvoiceAdjustment[]
 
   @@unique([customerId, month, year]) // Invariant: exactly one invoice per customer-month-year
   @@index([farmerId, status])
@@ -330,7 +341,8 @@ model Payment {
   tenantId       String
   invoiceId      String
   customerId     String
-  farmerId       String
+  farmerId          String
+  /// CHECK (amount > 0) enforced in PostgreSQL via scripts/migrate.ts; UNIQUE(transactionRef) = idempotency invariant
   amount         Float
   method         String   @default("UPI") // UPI, CASH, CARD, NETBANKING
   transactionRef String   @unique // Database-enforced idempotency invariant!
@@ -472,3 +484,180 @@ model AuditBlock {
   @@unique([tenantId, index])
   @@map("audit_blocks")
 }
+
+// ---------------------------------------------------------
+// Secure Invitations (Token Hashed at Rest)
+// ---------------------------------------------------------
+
+model CustomerInvitation {
+  id           String    @id @default(uuid())
+  customerId   String    @unique
+  tokenHash    String    @unique // SHA-256 hash of raw token
+  channel      String    @default("SMS") // 'SMS' | 'WHATSAPP' | 'QR_LINK'
+  expiresAt    DateTime
+  usedAt       DateTime?
+  revokedAt    DateTime?
+  createdById  String
+  attemptCount Int       @default(0)
+  createdAt    DateTime  @default(now())
+
+  customer CustomerProfile @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@map("customer_invitations")
+}
+
+// ---------------------------------------------------------
+// Subscription Versioning (Effective-Dated)
+// ---------------------------------------------------------
+
+model SubscriptionVersion {
+  id             String    @id @default(uuid())
+  subscriptionId String
+  customerId     String
+  productId      String
+  quantity       Float
+  frequency      String    @default("DAILY")
+  shift          String    @default("MORNING") // 'MORNING' | 'EVENING'
+  effectiveFrom  DateTime
+  effectiveTo    DateTime?
+  createdById    String
+  createdAt      DateTime  @default(now())
+
+  customer CustomerProfile @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@map("subscription_versions")
+}
+
+// ---------------------------------------------------------
+// Product Price History (Effective-Dated)
+// ---------------------------------------------------------
+
+model ProductPriceHistory {
+  id            String    @id @default(uuid())
+  productId     String
+  pricePerUnit  Float
+  effectiveFrom DateTime
+  effectiveTo   DateTime?
+  createdById   String
+  createdAt     DateTime  @default(now())
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@map("product_price_histories")
+}
+
+// ---------------------------------------------------------
+// Customer Transfer Workflow
+// ---------------------------------------------------------
+
+model CustomerTransferRequest {
+  id            String    @id @default(uuid())
+  customerId    String
+  fromFarmerId  String
+  toFarmerId    String
+  status        String    @default("PENDING") // 'PENDING' | 'APPROVED' | 'ACCEPTED' | 'REJECTED' | 'CANCELLED'
+  reason        String?
+  effectiveDate DateTime
+  createdAt     DateTime  @default(now())
+  resolvedAt    DateTime?
+
+  @@map("customer_transfer_requests")
+}
+
+// ---------------------------------------------------------
+// Invoice Adjustments (Credit / Debit Notes)
+// ---------------------------------------------------------
+
+model InvoiceAdjustment {
+  id           String   @id @default(uuid())
+  invoiceId    String
+  type         String   // 'CREDIT' | 'DEBIT'
+  amount       Float
+  reason       String
+  authorizedBy String
+  createdAt    DateTime @default(now())
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@map("invoice_adjustments")
+}
+
+// ---------------------------------------------------------
+// Month Closing Lifecycle
+// ---------------------------------------------------------
+
+model MonthClosing {
+  id          String   @id @default(uuid())
+  tenantId    String
+  farmerId    String
+  month       Int
+  year        Int
+  status      String   @default("FINALIZED") // 'DRAFT' | 'REVIEW' | 'FINALIZED'
+  closedBy    String
+  closedAt    DateTime @default(now())
+
+  @@unique([farmerId, month, year])
+  @@map("month_closings")
+}
+
+// ---------------------------------------------------------
+// Route & Shift Operations
+// ---------------------------------------------------------
+
+model Route {
+  id          String   @id @default(uuid())
+  tenantId    String
+  farmerId    String
+  name        String
+  code        String
+  shift       String   @default("MORNING") // 'MORNING' | 'EVENING'
+  agentUserId String?
+  createdAt   DateTime @default(now())
+
+  stops RouteStop[]
+
+  @@map("routes")
+}
+
+model RouteStop {
+  id           String @id @default(uuid())
+  routeId      String
+  customerId   String
+  stopSequence Int
+
+  route    Route           @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  customer CustomerProfile @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@unique([routeId, customerId])
+  @@map("route_stops")
+}
+
+// ---------------------------------------------------------
+// Customer Deduplication & Merge Logs
+// ---------------------------------------------------------
+
+model CustomerMergeLog {
+  id                String   @id @default(uuid())
+  primaryCustomerId String
+  mergedCustomerId  String
+  performedBy       String
+  mergedAt          DateTime @default(now())
+
+  @@map("customer_merge_logs")
+}
+
+// ---------------------------------------------------------
+// Universal Mutation Idempotency Logs
+// ---------------------------------------------------------
+
+model OperationLog {
+  id          String   @id @default(uuid())
+  operationId String   @unique
+  action      String
+  actorId     String
+  resultJson  String
+  createdAt   DateTime @default(now())
+
+  @@map("operation_logs")
+}
+

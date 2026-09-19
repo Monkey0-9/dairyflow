@@ -2,7 +2,21 @@
 
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Droplets, ShieldCheck, ArrowRight, UserCheck, CheckCircle2, Phone, Home, Sparkles, Clock } from 'lucide-react';
+import {
+  Droplets,
+  ArrowRight,
+  CheckCircle2,
+  Phone,
+  Home,
+  Sparkles,
+  Clock,
+  Lock,
+  Mail,
+  User,
+  ShieldAlert,
+  Calendar,
+  AlertCircle,
+} from 'lucide-react';
 import Link from 'next/link';
 
 export default function RegisterPage() {
@@ -11,6 +25,8 @@ export default function RegisterPage() {
   const [formData, setFormData] = useState({
     name: '',
     phone: '',
+    email: '',
+    password: '',
     address: '',
     productId: 'prod_cow_milk',
     quantity: '1.0',
@@ -19,6 +35,15 @@ export default function RegisterPage() {
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [submittedData, setSubmittedData] = useState<{
+    name: string;
+    phone: string;
+    email: string;
+    product: string;
+    quantity: number;
+    shift: string;
+    address: string;
+  } | null>(null);
 
   const products = [
     {
@@ -43,8 +68,12 @@ export default function RegisterPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.name || !formData.phone || !formData.address) {
-      setError('Please fill in your name, mobile phone, and delivery address.');
+    if (!formData.name || !formData.phone || !formData.password || !formData.address) {
+      setError('Please fill in your name, mobile phone, password, and delivery address.');
+      return;
+    }
+    if (formData.password.length < 6) {
+      setError('Password must be at least 6 characters.');
       return;
     }
 
@@ -59,8 +88,15 @@ export default function RegisterPage() {
       });
       const data = await res.json();
       if (data.success) {
-        router.push(data.redirectUrl || '/customer');
-        router.refresh();
+        setSubmittedData(data.clientDetails || {
+          name: formData.name,
+          phone: formData.phone,
+          email: formData.email,
+          product: products.find((p) => p.id === formData.productId)?.name || 'Fresh Cow Milk',
+          quantity: parseFloat(formData.quantity),
+          shift: formData.deliveryShift,
+          address: formData.address,
+        });
       } else {
         setError(data.error || 'Registration failed');
       }
@@ -70,6 +106,78 @@ export default function RegisterPage() {
       setLoading(false);
     }
   };
+
+  if (submittedData) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-950 to-emerald-950 text-white flex flex-col justify-center py-12 px-4 sm:px-6 lg:px-8">
+        <div className="sm:mx-auto sm:w-full sm:max-w-xl">
+          <div className="bg-white/95 backdrop-blur-md py-8 px-6 shadow-2xl rounded-3xl sm:px-10 text-slate-900 border border-emerald-500/30 text-center space-y-6">
+            <div className="mx-auto w-16 h-16 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-600 shadow-lg">
+              <Clock className="w-8 h-8 animate-spin" style={{ animationDuration: '6s' }} />
+            </div>
+
+            <div>
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider bg-amber-100 text-amber-900 border border-amber-300">
+                <AlertCircle className="w-3.5 h-3.5 text-amber-700" />
+                Pending Admin Approval
+              </span>
+              <h2 className="text-2xl font-black text-slate-900 mt-2">Registration Submitted!</h2>
+              <p className="text-xs text-slate-600 mt-1.5 max-w-md mx-auto">
+                Thank you for applying for daily milk delivery. Your registration has been sent to <strong>Prakash Paraveen (Admin)</strong> for verification.
+              </p>
+            </div>
+
+            {/* Application Summary Card */}
+            <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-left space-y-2.5 text-xs">
+              <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-200 pb-1 flex items-center justify-between">
+                <span>Application Summary</span>
+                <span className="text-emerald-700 font-mono">GreenValley Dairy</span>
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-slate-700">
+                <div>
+                  <span className="text-[10px] text-slate-400 block uppercase">Client Name</span>
+                  <strong className="text-slate-900">{submittedData.name}</strong>
+                </div>
+                <div>
+                  <span className="text-[10px] text-slate-400 block uppercase">Mobile Phone</span>
+                  <strong className="text-slate-900 font-mono">{submittedData.phone}</strong>
+                </div>
+                <div>
+                  <span className="text-[10px] text-slate-400 block uppercase">Product & Qty</span>
+                  <strong className="text-slate-900">{submittedData.quantity}L &bull; {submittedData.product}</strong>
+                </div>
+                <div>
+                  <span className="text-[10px] text-slate-400 block uppercase">Delivery Shift</span>
+                  <strong className="text-slate-900">{submittedData.shift === 'MORNING' ? 'Morning (6-8 AM)' : 'Evening (5-7 PM)'}</strong>
+                </div>
+              </div>
+              <div className="pt-1 text-slate-600 text-[11px]">
+                <span className="text-[10px] text-slate-400 block uppercase">Delivery Address</span>
+                {submittedData.address}
+              </div>
+            </div>
+
+            {/* Note on access */}
+            <div className="p-3.5 rounded-2xl bg-emerald-50/80 border border-emerald-200 text-xs text-emerald-950 flex items-start gap-2.5 text-left">
+              <ShieldAlert className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+              <div className="text-[11px] leading-relaxed">
+                <strong>Next Step:</strong> As soon as the admin accepts your registration, your account will be activated and you can sign in directly using your phone/email and password.
+              </div>
+            </div>
+
+            {/* Go to Login Button */}
+            <Link
+              href="/login"
+              className="w-full py-3 px-4 rounded-xl text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 transition shadow-sm active:scale-98 flex items-center justify-center gap-2"
+            >
+              <span>Go to Sign In</span>
+              <ArrowRight className="w-4 h-4" />
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-950 to-emerald-950 text-white flex flex-col justify-center py-12 px-4 sm:px-6 lg:px-8">
@@ -81,7 +189,7 @@ export default function RegisterPage() {
           <span>Register for Daily Milk Delivery</span>
         </h1>
         <p className="mt-1 text-xs text-slate-400 font-medium max-w-md mx-auto">
-          Delivered fresh to your doorstep every morning by <strong>GreenValley Dairy Farm</strong>. Automated digital monthly billing.
+          Delivered fresh to your doorstep every morning by <strong>GreenValley Dairy Farm</strong>. Reviewed and approved by dairy administration.
         </p>
       </div>
 
@@ -97,19 +205,22 @@ export default function RegisterPage() {
             {/* Name & Phone */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Full Name</label>
-                <input
-                  type="text"
-                  required
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  placeholder="e.g. Meera Patel"
-                  className="w-full px-3.5 py-2 rounded-xl border border-slate-200 text-xs font-semibold focus:outline-none focus:border-emerald-500 bg-slate-50 focus:bg-white transition"
-                />
+                <label className="block text-xs font-bold text-slate-700 mb-1">Full Name *</label>
+                <div className="relative">
+                  <User className="w-3.5 h-3.5 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="text"
+                    required
+                    value={formData.name}
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    placeholder="e.g. Meera Patel"
+                    className="w-full pl-9 pr-3.5 py-2 rounded-xl border border-slate-200 text-xs font-semibold focus:outline-none focus:border-emerald-500 bg-slate-50 focus:bg-white transition"
+                  />
+                </div>
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Mobile Phone</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Mobile Phone *</label>
                 <div className="relative">
                   <Phone className="w-3.5 h-3.5 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
                   <input
@@ -124,10 +235,43 @@ export default function RegisterPage() {
               </div>
             </div>
 
+            {/* Email & Password */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Email Address</label>
+                <div className="relative">
+                  <Mail className="w-3.5 h-3.5 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="email"
+                    value={formData.email}
+                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                    placeholder="e.g. meera@gmail.com"
+                    className="w-full pl-9 pr-3.5 py-2 rounded-xl border border-slate-200 text-xs font-semibold focus:outline-none focus:border-emerald-500 bg-slate-50 focus:bg-white transition"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Create Password *</label>
+                <div className="relative">
+                  <Lock className="w-3.5 h-3.5 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="password"
+                    required
+                    minLength={6}
+                    value={formData.password}
+                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                    placeholder="Min. 6 characters"
+                    className="w-full pl-9 pr-3.5 py-2 rounded-xl border border-slate-200 text-xs font-semibold focus:outline-none focus:border-emerald-500 bg-slate-50 focus:bg-white transition"
+                  />
+                </div>
+              </div>
+            </div>
+
             {/* Delivery Address */}
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1">
-                Complete Delivery Address & Flat Number
+                Complete Delivery Address & Flat Number *
               </label>
               <div className="relative">
                 <Home className="w-3.5 h-3.5 absolute left-3.5 top-3 text-slate-400" />
@@ -235,7 +379,7 @@ export default function RegisterPage() {
             <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-600 flex items-center gap-2">
               <Sparkles className="w-4 h-4 text-emerald-600 shrink-0" />
               <span>
-                Your subscription will be serviced by <strong>GreenValley Dairy Farm</strong> (Plot 42, Anand).
+                Your request will be sent to <strong>Prakash Paraveen (Admin)</strong> for acceptance & route setup.
               </span>
             </div>
 
@@ -245,7 +389,7 @@ export default function RegisterPage() {
               disabled={loading}
               className="w-full py-3 px-4 rounded-xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 transition shadow-sm active:scale-98 cursor-pointer flex items-center justify-center gap-2"
             >
-              <span>{loading ? 'Creating Your Account...' : 'Complete Registration & Start Delivery'}</span>
+              <span>{loading ? 'Submitting Registration...' : 'Submit Registration for Admin Approval'}</span>
               <ArrowRight className="w-4 h-4" />
             </button>
           </form>
@@ -253,7 +397,7 @@ export default function RegisterPage() {
           {/* Link to Login */}
           <div className="mt-4 pt-3 text-center border-t border-slate-100">
             <p className="text-xs text-slate-600">
-              Already have an account?{' '}
+              Already approved or have an account?{' '}
               <Link href="/login" className="font-bold text-emerald-600 hover:text-emerald-700 hover:underline">
                 Sign in here →
               </Link>

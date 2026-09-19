@@ -1,8 +1,9 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import { X, Printer, CheckCircle2, AlertCircle, Droplets, Download } from 'lucide-react';
 import { Invoice } from '@/lib/types';
+import { downloadInvoicePdf } from '@/lib/invoice-pdf';
 
 interface InvoiceModalProps {
   invoice: Invoice | null;
@@ -17,10 +18,31 @@ export default function InvoiceModal({
   onPayNow,
   isCustomerView = false,
 }: InvoiceModalProps) {
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const [pdfError, setPdfError] = useState<string | null>(null);
+
   if (!invoice) return null;
 
   const handlePrint = () => {
     window.print();
+  };
+
+  const handleDownloadPdf = async () => {
+    setPdfBusy(true);
+    setPdfError(null);
+    try {
+      const result = await downloadInvoicePdf({
+        customerId: invoice.customerId,
+        invoiceId: invoice.id,
+        month: invoice.month,
+        year: invoice.year,
+        customerName: invoice.customerName,
+        customerPhone: invoice.customerPhone,
+      });
+      if (!result.success) setPdfError(result.error || 'PDF failed');
+    } finally {
+      setPdfBusy(false);
+    }
   };
 
   return (
@@ -54,13 +76,29 @@ export default function InvoiceModal({
               <span>Print / PDF</span>
             </button>
             <button
+              onClick={() => void handleDownloadPdf()}
+              disabled={pdfBusy}
+              className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-xs font-semibold text-white flex items-center gap-1.5 transition"
+              title="Download formatted invoice PDF"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>{pdfBusy ? 'Preparing…' : 'Download PDF'}</span>
+            </button>
+            <button
               onClick={onClose}
+              aria-label="Close invoice"
               className="p-1.5 rounded-xl hover:bg-slate-100 text-slate-400 hover:text-slate-700 transition"
             >
               <X className="w-5 h-5" />
             </button>
           </div>
         </div>
+
+        {pdfError && (
+          <div className="px-6 py-2 bg-rose-50 text-rose-800 text-xs font-bold no-print">
+            PDF download failed: {pdfError}
+          </div>
+        )}
 
         {/* Printable Invoice Sheet */}
         <div id="printable-document" className="p-8 text-slate-800">

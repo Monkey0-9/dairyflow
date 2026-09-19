@@ -14,11 +14,13 @@ import {
   Lock,
   Bell,
   DollarSign,
+  Plus,
 } from 'lucide-react';
 import { DeliveryRecord, DeliveryStatus, CustomerProfile } from '@/lib/types';
 import QRScannerModal from '../common/QRScannerModal';
 import EndOfDayClosingModal from './EndOfDayClosingModal';
 import { useMilkFlowEvents, playNotificationChime } from '@/lib/use-milkflow-events';
+import { useT } from '@/lib/i18n';
 
 interface FarmerDashboardProps {
   selectedDate: string;
@@ -70,6 +72,7 @@ export default function FarmerDashboard({
   const [isUpdating, setIsUpdating] = useState(false);
   const [liveAttention, setLiveAttention] = useState(0);
   const [liveFlash, setLiveFlash] = useState(false);
+  const { t } = useT();
 
   // Live updates: customer pauses / disputes / payments arrive via SSE
   useMilkFlowEvents((evt) => {
@@ -159,6 +162,22 @@ export default function FarmerDashboard({
     setIsUpdating(false);
   };
 
+  // Batch mark all pending as delivered
+  const handleBatchDeliverAll = async () => {
+    const pendingList = records.filter(
+      (r) => r.deliveredQuantity === 0 && r.status !== 'SKIPPED'
+    );
+    if (pendingList.length === 0) return;
+    setIsUpdating(true);
+    for (const r of pendingList) {
+      await onUpdateRecord(r.id, {
+        deliveredQuantity: r.scheduledQuantity,
+        status: 'DELIVERED',
+      });
+    }
+    setIsUpdating(false);
+  };
+
   // Open Edit Modal
   const openEditModal = (record: DeliveryRecord) => {
     setEditingRecord(record);
@@ -197,29 +216,51 @@ export default function FarmerDashboard({
     year: 'numeric',
   });
 
+  const completionPercent =
+    stats.totalScheduled > 0
+      ? Math.min(100, Math.round((stats.totalDelivered / stats.totalScheduled) * 100))
+      : stats.customerCount > 0
+      ? 0
+      : 100;
+
   return (
     <div className="space-y-6 pb-16">
       {/* Top Header & Fast Actions */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-5 rounded-3xl border border-slate-200/80 shadow-xs">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white/95 backdrop-blur-md p-6 rounded-3xl border border-slate-200/80 shadow-xs hover-glow-emerald transition-all">
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2.5">
             <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-            <h1 className="text-xl font-extrabold text-slate-900 tracking-tight">
+            <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
               Daily Delivery Command Center
             </h1>
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
+              Shift: 06:00 - 08:00 AM
+            </span>
           </div>
-          <p className="text-xs text-slate-500 mt-1 flex items-center gap-1.5">
-            <Calendar className="w-3.5 h-3.5 text-slate-400" />
-            <span className="font-semibold text-slate-700">{formattedDate}</span>
-            <span>• Morning Delivery Shift (6:00 AM – 8:00 AM)</span>
+          <p className="text-xs text-slate-500 mt-1 flex items-center gap-2">
+            <Calendar className="w-3.5 h-3.5 text-emerald-600" />
+            <span className="font-bold text-slate-800">{formattedDate}</span>
+            <span>•</span>
+            <span className="text-emerald-700 font-semibold">{completionPercent}% Dispatched</span>
           </p>
         </div>
 
-        <div className="flex items-center gap-2 w-full sm:w-auto">
+        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+          {records.some((r) => r.deliveredQuantity === 0 && r.status !== 'SKIPPED') && (
+            <button
+              onClick={handleBatchDeliverAll}
+              disabled={isUpdating}
+              className="px-3.5 py-2 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm shadow-emerald-600/20 hover-lift transition cursor-pointer"
+            >
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              <span>Deliver All Pending</span>
+            </button>
+          )}
+
           <button
             onClick={() => setShowClosingModal(true)}
             id="btn-end-of-day-closing"
-            className="px-3.5 py-2 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 text-xs font-bold flex items-center justify-center gap-1.5 shadow-xs transition"
+            className="px-3.5 py-2 rounded-2xl bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 text-xs font-bold flex items-center justify-center gap-1.5 shadow-xs hover-lift transition cursor-pointer"
           >
             <Lock className="w-3.5 h-3.5 text-amber-700" />
             <span>End of Day Closing</span>
@@ -227,15 +268,15 @@ export default function FarmerDashboard({
 
           <button
             onClick={() => setShowQRScanner(true)}
-            className="flex-1 sm:flex-initial px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold flex items-center justify-center gap-2 shadow-sm transition"
+            className="flex-1 sm:flex-initial px-4 py-2 rounded-2xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold flex items-center justify-center gap-2 shadow-sm hover-lift transition cursor-pointer"
           >
             <QrCode className="w-4 h-4 text-emerald-400" />
-            <span>Scan Customer QR</span>
+            <span>Scan QR</span>
           </button>
 
           <button
             onClick={onRefresh}
-            className="p-2 rounded-xl border border-slate-200 hover:bg-slate-100 text-slate-600 transition"
+            className="p-2 rounded-2xl border border-slate-200 hover:bg-slate-100 text-slate-600 transition"
             title="Refresh Ledger"
           >
             <RefreshCw className="w-4 h-4" />
@@ -243,55 +284,64 @@ export default function FarmerDashboard({
         </div>
       </div>
 
-      {/* KPI Cards Row */}
+      {/* KPI Cards Row with Progress Completion */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
-          <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+        <div className="bg-white p-4.5 rounded-3xl border border-slate-200 shadow-xs metric-accent-emerald hover-lift">
+          <div className="text-[10px] font-black text-slate-400 uppercase tracking-wider">
             Total Customers
           </div>
-          <div className="text-2xl font-black text-slate-900 mt-1 font-mono">
+          <div className="text-2xl font-black text-slate-900 mt-1.5 font-mono">
             {stats.customerCount}
           </div>
           <div className="text-[11px] text-slate-500 mt-0.5">Active Subscribers</div>
         </div>
 
-        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
-          <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+        <div className="bg-white p-4.5 rounded-3xl border border-slate-200 shadow-xs metric-accent-indigo hover-lift">
+          <div className="text-[10px] font-black text-slate-400 uppercase tracking-wider">
             Expected Milk
           </div>
-          <div className="text-2xl font-black text-slate-900 mt-1 font-mono">
-            {stats.totalScheduled} <span className="text-sm font-bold text-slate-400">L</span>
+          <div className="text-2xl font-black text-slate-900 mt-1.5 font-mono">
+            {stats.totalScheduled} <span className="text-xs font-bold text-slate-400">L</span>
           </div>
-          <div className="text-[11px] text-emerald-600 font-semibold mt-0.5">Scheduled Demand</div>
+          <div className="text-[11px] text-indigo-600 font-semibold mt-0.5">Scheduled Demand</div>
         </div>
 
-        <div className="p-4 rounded-2xl border border-emerald-200 bg-emerald-50/20 shadow-xs">
-          <div className="text-[11px] font-bold text-emerald-700 uppercase tracking-wider">
-            Delivered Milk
+        <div className="p-4.5 rounded-3xl border border-emerald-200 bg-emerald-50/25 shadow-xs metric-accent-emerald hover-lift">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-black text-emerald-700 uppercase tracking-wider">
+              Delivered Milk
+            </span>
+            <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-1.5 py-0.2 rounded-full">
+              {completionPercent}%
+            </span>
           </div>
-          <div className="text-2xl font-black text-emerald-700 mt-1 font-mono">
-            {stats.totalDelivered} <span className="text-sm font-bold text-emerald-500">L</span>
+          <div className="text-2xl font-black text-emerald-700 mt-1.5 font-mono">
+            {stats.totalDelivered} <span className="text-xs font-bold text-emerald-500">L</span>
           </div>
-          <div className="text-[11px] text-emerald-600 font-semibold mt-0.5">
-            {stats.deliveredCount} Customers Served
+          {/* Mini progress bar */}
+          <div className="w-full bg-emerald-200/60 rounded-full h-1.5 mt-2 overflow-hidden">
+            <div
+              className="bg-emerald-600 h-1.5 rounded-full transition-all duration-500"
+              style={{ width: `${completionPercent}%` }}
+            />
           </div>
         </div>
 
-        <div className="p-4 rounded-2xl border border-amber-200 bg-amber-50/20 shadow-xs">
-          <div className="text-[11px] font-bold text-amber-700 uppercase tracking-wider">
-            Pending / Remainder
+        <div className="p-4.5 rounded-3xl border border-amber-200 bg-amber-50/25 shadow-xs metric-accent-amber hover-lift">
+          <div className="text-[10px] font-black text-amber-700 uppercase tracking-wider">
+            Pending Drop
           </div>
-          <div className="text-2xl font-black text-amber-700 mt-1 font-mono">
-            {stats.pendingLitres} <span className="text-sm font-bold text-amber-500">L</span>
+          <div className="text-2xl font-black text-amber-700 mt-1.5 font-mono">
+            {stats.pendingLitres} <span className="text-xs font-bold text-amber-500">L</span>
           </div>
-          <div className="text-[11px] text-amber-600 font-semibold mt-0.5">Awaiting Drop</div>
+          <div className="text-[11px] text-amber-600 font-semibold mt-0.5">Awaiting Delivery</div>
         </div>
 
-        <div className="p-4 rounded-2xl border border-rose-200 bg-rose-50/20 shadow-xs col-span-2 md:col-span-1">
-          <div className="text-[11px] font-bold text-rose-700 uppercase tracking-wider">
+        <div className="p-4.5 rounded-3xl border border-rose-200 bg-rose-50/25 shadow-xs col-span-2 md:col-span-1 metric-accent-rose hover-lift">
+          <div className="text-[10px] font-black text-rose-700 uppercase tracking-wider">
             Exceptions & Skips
           </div>
-          <div className="text-2xl font-black text-rose-700 mt-1 font-mono">
+          <div className="text-2xl font-black text-rose-700 mt-1.5 font-mono">
             {stats.skippedCount + stats.partialCount}
           </div>
           <div className="text-[11px] text-rose-600 font-semibold mt-0.5">
@@ -301,12 +351,12 @@ export default function FarmerDashboard({
       </div>
 
       {/* Needs Attention / Exception Quick Action Center */}
-      <div className="bg-gradient-to-r from-amber-500/10 via-rose-500/10 to-purple-500/10 border border-amber-200/80 rounded-2xl p-4 shadow-xs">
+      <div className="bg-linear-to-r from-amber-500/10 via-rose-500/10 to-purple-500/10 border border-amber-200/80 rounded-2xl p-4 shadow-xs">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-ping" />
             <span className="text-xs font-black uppercase tracking-wider text-slate-800">
-              Needs Attention
+              {t('farmer.needsAttention')}
             </span>
             {liveAttention > 0 && (
               <span
@@ -322,28 +372,28 @@ export default function FarmerDashboard({
               className="px-3 py-1.5 rounded-xl bg-white hover:bg-amber-50 text-amber-900 border border-amber-200 text-xs font-bold flex items-center gap-1.5 transition shadow-xs cursor-pointer"
             >
               <Bell className="w-3.5 h-3.5 text-amber-600" />
-              <span>Customer Requests</span>
+              <span>{t('farmer.customerRequests')}</span>
             </button>
             <button
               onClick={() => onNavigateTab?.('disputes')}
               className="px-3 py-1.5 rounded-xl bg-white hover:bg-rose-50 text-rose-900 border border-rose-200 text-xs font-bold flex items-center gap-1.5 transition shadow-xs cursor-pointer"
             >
               <AlertTriangle className="w-3.5 h-3.5 text-rose-600" />
-              <span>{stats.disputedCount || 1} Open Dispute</span>
+              <span>{stats.disputedCount || 1} {t('farmer.openDispute')}</span>
             </button>
             <button
               onClick={() => onNavigateTab?.('billing')}
               className="px-3 py-1.5 rounded-xl bg-white hover:bg-emerald-50 text-emerald-900 border border-emerald-200 text-xs font-bold flex items-center gap-1.5 transition shadow-xs cursor-pointer"
             >
               <DollarSign className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Pending Billing</span>
+              <span>{t('farmer.pendingBilling')}</span>
             </button>
             <button
               onClick={() => setFilterStatus('SKIPPED')}
               className="px-3 py-1.5 rounded-xl bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 text-xs font-bold flex items-center gap-1.5 transition shadow-xs cursor-pointer"
             >
               <SkipForward className="w-3.5 h-3.5 text-slate-500" />
-              <span>{stats.skippedCount + stats.partialCount} Exceptions Today</span>
+              <span>{stats.skippedCount + stats.partialCount} {t('farmer.exceptionsToday')}</span>
             </button>
           </div>
         </div>
@@ -408,9 +458,46 @@ export default function FarmerDashboard({
       </div>
 
       {/* Main Delivery Records View */}
-      {viewMode === 'CARDS' ? (
+      {filteredRecords.length === 0 ? (
+        <div className="bg-white rounded-3xl p-12 border border-slate-200 text-center shadow-xs">
+          {records.length === 0 ? (
+            <div className="max-w-md mx-auto space-y-4">
+              <div className="w-16 h-16 rounded-3xl bg-emerald-50 border border-emerald-200/80 flex items-center justify-center text-emerald-600 mx-auto shadow-sm animate-float-subtle">
+                <Droplets className="w-8 h-8" />
+              </div>
+              <div>
+                <h3 className="text-lg font-black text-slate-900">Platform Ready for Real Customers</h3>
+                <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                  All demo records have been cleared. Add your real customers to begin recording daily morning & evening milk deliveries.
+                </p>
+              </div>
+              <div className="pt-2 flex items-center justify-center gap-3">
+                <button
+                  onClick={() => onNavigateTab('customers')}
+                  className="px-5 py-2.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs flex items-center gap-2 shadow-md shadow-emerald-500/20 hover-lift transition cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Add First Customer</span>
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="max-w-md mx-auto space-y-3">
+              <Search className="w-10 h-10 text-slate-300 mx-auto" />
+              <h3 className="text-sm font-bold text-slate-700">No matching deliveries found</h3>
+              <p className="text-xs text-slate-400">Try adjusting your search query or filter pills.</p>
+              <button
+                onClick={() => { setSearchQuery(''); setFilterStatus('ALL'); }}
+                className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition"
+              >
+                Clear Filters
+              </button>
+            </div>
+          )}
+        </div>
+      ) : viewMode === 'CARDS' ? (
         /* Mobile-First Touch Card Grid */
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
           {filteredRecords.map((record) => {
             const isDelivered = record.status === 'DELIVERED' || record.status === 'EXTRA';
             const isSkipped = record.status === 'SKIPPED';
@@ -420,7 +507,7 @@ export default function FarmerDashboard({
             return (
               <div
                 key={record.id}
-                className={`bg-white rounded-3xl p-5 border transition-all duration-200 shadow-xs hover:shadow-md relative overflow-hidden ${
+                className={`bg-white rounded-3xl p-5 border transition-all duration-200 shadow-xs hover-lift relative overflow-hidden ${
                   isDisputed
                     ? 'border-rose-400 bg-rose-50/20 ring-2 ring-rose-300/40'
                     : isSkipped
@@ -431,28 +518,33 @@ export default function FarmerDashboard({
                 }`}
               >
                 {/* Top Row: Customer Code, Name, Time */}
-                <div className="flex items-start justify-between">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[11px] font-bold font-mono px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 border border-slate-200">
-                        {record.customerCode}
-                      </span>
-                      <h3 className="text-base font-bold text-slate-900">{record.customerName}</h3>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-start gap-3">
+                    <div className="w-9 h-9 rounded-2xl bg-linear-to-tr from-emerald-600 to-teal-500 text-white flex items-center justify-center font-black text-xs shadow-xs shrink-0 mt-0.5">
+                      {record.customerName.charAt(0)}
                     </div>
-                    <p className="text-xs text-slate-500 mt-1 flex items-center gap-1.5">
-                      <Droplets className="w-3.5 h-3.5 text-emerald-600" />
-                      <span>{record.productName}</span>
-                      <span>•</span>
-                      <span className="font-semibold text-slate-700">
-                        {record.scheduledQuantity} L scheduled
-                      </span>
-                    </p>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-bold font-mono px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 border border-slate-200">
+                          {record.customerCode}
+                        </span>
+                        <h3 className="text-sm font-extrabold text-slate-900">{record.customerName}</h3>
+                      </div>
+                      <p className="text-xs text-slate-500 mt-1 flex items-center gap-1.5">
+                        <Droplets className="w-3.5 h-3.5 text-emerald-600" />
+                        <span>{record.productName}</span>
+                        <span>•</span>
+                        <span className="font-semibold text-slate-700">
+                          {record.scheduledQuantity} L scheduled
+                        </span>
+                      </p>
+                    </div>
                   </div>
 
                   {/* Status Badge */}
-                  <div className="text-right">
+                  <div className="text-right shrink-0">
                     <span
-                      className={`text-[11px] font-extrabold px-2.5 py-1 rounded-full uppercase tracking-wider ${
+                      className={`text-[10px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider ${
                         isDisputed
                           ? 'bg-rose-100 text-rose-800 border border-rose-300'
                           : isSkipped
@@ -466,7 +558,7 @@ export default function FarmerDashboard({
                     >
                       {record.status}
                     </span>
-                    <div className="text-[11px] font-mono text-slate-500 mt-1">
+                    <div className="text-[11px] font-mono font-bold text-slate-600 mt-1">
                       {record.deliveredQuantity} L recorded
                     </div>
                   </div>
@@ -474,7 +566,7 @@ export default function FarmerDashboard({
 
                 {/* Reason Note (if skipped or partial or dispute) */}
                 {record.reason && (
-                  <div className="mt-3 p-2 rounded-xl bg-slate-100/90 text-[11px] text-slate-700 flex items-center gap-1.5">
+                  <div className="mt-3 p-2.5 rounded-2xl bg-slate-100/90 text-[11px] text-slate-700 flex items-center gap-1.5">
                     <span className="font-bold text-slate-500">Note:</span>
                     <span className="italic truncate">{record.reason}</span>
                   </div>
@@ -482,14 +574,14 @@ export default function FarmerDashboard({
 
                 {/* Dispute Alert Banner */}
                 {isDisputed && (
-                  <div className="mt-3 p-2.5 rounded-xl bg-rose-100 border border-rose-200 text-xs text-rose-800 flex items-center justify-between">
+                  <div className="mt-3 p-2.5 rounded-2xl bg-rose-100 border border-rose-200 text-xs text-rose-800 flex items-center justify-between">
                     <div className="flex items-center gap-1.5 font-bold">
                       <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
                       <span>Customer claims 0 L delivered</span>
                     </div>
                     <button
                       onClick={() => onNavigateTab('disputes')}
-                      className="text-[11px] font-extrabold underline text-rose-900"
+                      className="text-[11px] font-extrabold underline text-rose-900 cursor-pointer"
                     >
                       Resolve
                     </button>
@@ -501,7 +593,7 @@ export default function FarmerDashboard({
                   <button
                     onClick={() => handleQuickDeliver(record)}
                     disabled={isUpdating}
-                    className={`py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition ${
+                    className={`py-2 px-3 rounded-2xl text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer ${
                       isDelivered && !isPartial
                         ? 'bg-emerald-700 text-white shadow-xs'
                         : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs'
@@ -514,7 +606,7 @@ export default function FarmerDashboard({
                   <button
                     onClick={() => handleQuickSkip(record)}
                     disabled={isUpdating}
-                    className={`py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition ${
+                    className={`py-2 px-3 rounded-2xl text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer ${
                       isSkipped
                         ? 'bg-rose-700 text-white'
                         : 'bg-slate-100 hover:bg-rose-50 text-slate-700 hover:text-rose-700'
@@ -526,7 +618,7 @@ export default function FarmerDashboard({
 
                   <button
                     onClick={() => openEditModal(record)}
-                    className="py-2 px-3 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 flex items-center justify-center gap-1.5 transition"
+                    className="py-2 px-3 rounded-2xl text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 flex items-center justify-center gap-1.5 transition cursor-pointer"
                   >
                     <Edit3 className="w-3.5 h-3.5" />
                     <span>Edit Qty</span>

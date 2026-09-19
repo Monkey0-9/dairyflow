@@ -5,8 +5,26 @@ import { getStore } from '@/lib/store';
 import { getInvoices } from '@/lib/services/billing.service';
 import { getLedgerRange } from '@/lib/services/delivery.service';
 import { buildReminderMessage, buildWhatsAppLink, ReminderLang } from '@/lib/reminders';
+import { groundedAnswer } from '@/lib/ai-llm';
 
 const isUnitTest = () => process.env.TEST_ENV === 'unit' || process.env.VITEST === 'true';
+
+/**
+ * Try an LLM-grounded rewrite of a rule-engine answer. Always resolves to
+ * { answer, source } — 'llm' when the model responded, 'rules' otherwise.
+ */
+async function maybeEnhance(
+  question: string,
+  ruleAnswer: string,
+  facts: Record<string, unknown>,
+  lang: string
+): Promise<{ answer: string; source: 'llm' | 'rules' }> {
+  try {
+    const polished = await groundedAnswer(question, facts, lang);
+    if (polished) return { answer: polished, source: 'llm' };
+  } catch { /* fall through to rules */ }
+  return { answer: ruleAnswer, source: 'rules' };
+}
 
 /**
  * POST /api/ai/copilot
@@ -88,12 +106,15 @@ export async function POST(req: NextRequest) {
       }
       const target = milkType ? (breakdown[milkType] ?? 0) : total;
       const safety = Math.round(target * 1.1 * 10) / 10;
+      const ruleAnswer = milkType
+        ? `You need ~${target.toFixed(1)} L of ${milkType} milk for tomorrow morning (safety stock: ${safety.toFixed(1)} L).`
+        : `You need ~${total.toFixed(1)} L total for tomorrow morning (safety stock: ${Math.round(total * 1.1 * 10) / 10} L). Breakdown: ${Object.entries(breakdown).map(([k, v]) => `${k} ${v.toFixed(1)} L`).join(', ') || 'n/a'}.`;
+      const enhanced = await maybeEnhance(q, ruleAnswer, { breakdown, total, milkType, date: dateStr }, lang);
       return NextResponse.json({
         success: true,
         type: 'procurement',
-        answer: milkType
-          ? `You need ~${target.toFixed(1)} L of ${milkType} milk for tomorrow morning (safety stock: ${safety.toFixed(1)} L).`
-          : `You need ~${total.toFixed(1)} L total for tomorrow morning (safety stock: ${Math.round(total * 1.1 * 10) / 10} L). Breakdown: ${Object.entries(breakdown).map(([k, v]) => `${k} ${v.toFixed(1)} L`).join(', ') || 'n/a'}.`,
+        answer: enhanced.answer,
+        source: enhanced.source,
         breakdown,
         total,
         date: dateStr,
@@ -133,12 +154,20 @@ export async function POST(req: NextRequest) {
         message: buildReminderMessage({ customerName: o.customerName, amount: o.amount, lang }),
         whatsappUrl: o.phone ? buildWhatsAppLink(o.phone, buildReminderMessage({ customerName: o.customerName, amount: o.amount, lang })) : null,
       }));
+      const ruleAnswer = overdue.length === 0
+        ? 'No unpaid bills found. All customers are settled.'
+        : `${overdue.length} customer(s) have unpaid bills${daysThreshold ? ` older than ${daysThreshold} days` : ''}: ${overdue.map((o) => `${o.customerName} (₹${o.amount})`).join(', ')}.`;
+      const enhanced = await maybeEnhance(
+        q,
+        ruleAnswer,
+        { overdue: overdue.slice(0, 20).map((o) => ({ name: o.customerName, amount: o.amount })), daysThreshold },
+        lang
+      );
       return NextResponse.json({
         success: true,
         type: 'overdue',
-        answer: overdue.length === 0
-          ? 'No unpaid bills found. All customers are settled.'
-          : `${overdue.length} customer(s) have unpaid bills${daysThreshold ? ` older than ${daysThreshold} days` : ''}: ${overdue.map((o) => `${o.customerName} (₹${o.amount})`).join(', ')}.`,
+        answer: enhanced.answer,
+        source: enhanced.source,
         customers: reminders,
       });
     }
@@ -176,12 +205,15 @@ export async function POST(req: NextRequest) {
           for (const c of chronic) c.customerName = nameMap.get(c.customerId) || c.customerId;
         } catch { /* keep ids */ }
       }
+      const ruleAnswer = chronic.length === 0
+        ? `No customers skipped ${threshold} or more deliveries this month.`
+        : `Customers with ${threshold}+ skips this month: ${chronic.map((c) => `${c.customerName} (${c.skips})`).join(', ')}.`;
+      const enhanced = await maybeEnhance(q, ruleAnswer, { chronic, threshold }, lang);
       return NextResponse.json({
         success: true,
         type: 'skippers',
-        answer: chronic.length === 0
-          ? `No customers skipped ${threshold} or more deliveries this month.`
-          : `Customers with ${threshold}+ skips this month: ${chronic.map((c) => `${c.customerName} (${c.skips})`).join(', ')}.`,
+        answer: enhanced.answer,
+        source: enhanced.source,
         customers: chronic,
       });
     }
