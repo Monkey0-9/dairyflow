@@ -52,7 +52,21 @@ export default function ProductPricing({ products, onUpdateProductPrice, onRefre
     setIsSaving(true);
     setPriceError(null);
     try {
-      const finalPrice: number | null = isEditNull ? null : parseFloat(editPrice);
+      let finalPrice: number | null = null;
+      if (!isEditNull) {
+        if (editPrice.trim() === '') {
+          throw new Error('Enter a valid rate or tick "Set as Null (Dynamic Rate)".');
+        }
+        finalPrice = parseFloat(editPrice);
+        if (!Number.isFinite(finalPrice) || finalPrice < 0) {
+          throw new Error('Rate must be a valid non-negative number.');
+        }
+        if (finalPrice > 10000) {
+          throw new Error('Rate looks too high (max ₹10,000). Please verify.');
+        }
+      } else {
+        finalPrice = null;
+      }
 
       // Call API
       const res = await fetch('/api/products', {
@@ -85,11 +99,23 @@ export default function ProductPricing({ products, onUpdateProductPrice, onRefre
 
   const handleCreateProduct = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newName) return;
+    if (!newName.trim()) {
+      setPriceError('Product name is required.');
+      return;
+    }
     setIsSaving(true);
     setPriceError(null);
     try {
-      const finalPrice = isNewPriceNull ? null : parseFloat(newPrice);
+      let finalPrice: number | null = null;
+      if (!isNewPriceNull) {
+        if (newPrice.trim() === '') {
+          throw new Error('Enter a valid cost rate or tick "Leave cost as Null".');
+        }
+        finalPrice = parseFloat(newPrice);
+        if (!Number.isFinite(finalPrice) || finalPrice < 0) {
+          throw new Error('Cost rate must be a valid non-negative number.');
+        }
+      }
       const res = await fetch('/api/products', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

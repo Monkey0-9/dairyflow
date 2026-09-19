@@ -539,12 +539,21 @@ export default function FarmerDashboard({
         </div>
       ) : viewMode === 'CARDS' ? (
         /* Mobile-First Touch Card Grid */
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+        <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-4">
           {filteredRecords.map((record) => {
-            const isDelivered = record.status === 'DELIVERED' || record.status === 'EXTRA';
+            const isDelivered = record.status === 'DELIVERED';
+            const isExtra = record.status === 'EXTRA';
             const isSkipped = record.status === 'SKIPPED';
             const isPartial = record.status === 'PARTIAL';
             const isDisputed = record.hasDispute || record.status === 'DISPUTED';
+
+            const formattedCode =
+              record.customerCode &&
+              !record.customerCode.startsWith('MK_QR_') &&
+              !record.customerCode.startsWith('QR_') &&
+              record.customerCode.length <= 10
+                ? record.customerCode
+                : `#${String(filteredRecords.indexOf(record) + 1).padStart(2, '0')}`;
 
             return (
               <div
@@ -554,29 +563,41 @@ export default function FarmerDashboard({
                     ? 'border-rose-400 bg-rose-50/20 ring-2 ring-rose-300/40'
                     : isSkipped
                     ? 'border-slate-200 bg-slate-50/60 opacity-90'
+                    : isExtra
+                    ? 'border-purple-200/90 bg-purple-50/20'
                     : isDelivered
                     ? 'border-emerald-200/90 bg-emerald-50/10'
                     : 'border-slate-200'
                 }`}
               >
-                {/* Top Row: Customer Code, Name, Time */}
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex items-start gap-3">
-                    <div className="w-9 h-9 rounded-2xl bg-linear-to-tr from-emerald-600 to-teal-500 text-white flex items-center justify-center font-black text-xs shadow-xs shrink-0 mt-0.5">
+                {/* Top Row: Customer Code, Name, Product, Status */}
+                <div className="flex items-start justify-between gap-3 min-w-0">
+                  <div className="flex items-start gap-3 min-w-0 flex-1">
+                    <div className="w-10 h-10 rounded-2xl bg-linear-to-tr from-emerald-600 to-teal-500 text-white flex items-center justify-center font-black text-sm shadow-xs shrink-0 mt-0.5">
                       {record.customerName.charAt(0)}
                     </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-[10px] font-bold font-mono px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 border border-slate-200">
-                          {record.customerCode}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span
+                          className="text-[10px] font-bold font-mono px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 border border-slate-200 shrink-0"
+                          title={record.qrToken ? `QR: ${record.qrToken}` : formattedCode}
+                        >
+                          {formattedCode}
                         </span>
-                        <h3 className="text-sm font-extrabold text-slate-900">{record.customerName}</h3>
+                        <h3 className="text-sm font-extrabold text-slate-900 truncate max-w-[140px] sm:max-w-[170px]" title={record.customerName}>
+                          {record.customerName}
+                        </h3>
+                        {isExtra && (
+                          <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 border border-purple-200 flex items-center gap-1 shrink-0">
+                            ✨ +Extra
+                          </span>
+                        )}
                       </div>
-                      <p className="text-xs text-slate-500 mt-1 flex items-center gap-1.5">
-                        <Droplets className="w-3.5 h-3.5 text-emerald-600" />
-                        <span>{record.productName}</span>
+                      <p className="text-xs text-slate-500 mt-1.5 flex items-center gap-1.5 flex-wrap">
+                        <Droplets className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                        <span className="truncate">{record.productName}</span>
                         <span>•</span>
-                        <span className="font-semibold text-slate-700">
+                        <span className="font-semibold text-slate-700 whitespace-nowrap">
                           {record.scheduledQuantity} L scheduled
                         </span>
                       </p>
@@ -584,23 +605,25 @@ export default function FarmerDashboard({
                   </div>
 
                   {/* Status Badge */}
-                  <div className="text-right shrink-0">
+                  <div className="text-right shrink-0 min-w-[85px]">
                     <span
-                      className={`text-[10px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider ${
+                      className={`text-[10px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider inline-block ${
                         isDisputed
                           ? 'bg-rose-100 text-rose-800 border border-rose-300'
                           : isSkipped
                           ? 'bg-slate-200 text-slate-700'
                           : isPartial
                           ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                          : isExtra
+                          ? 'bg-purple-100 text-purple-800 border border-purple-200'
                           : isDelivered
                           ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
-                          : 'bg-slate-100 text-slate-600'
+                          : 'bg-amber-50 text-amber-800 border border-amber-200'
                       }`}
                     >
                       {record.status}
                     </span>
-                    <div className="text-[11px] font-mono font-bold text-slate-600 mt-1">
+                    <div className="text-[11px] font-mono font-bold text-slate-600 mt-1 whitespace-nowrap">
                       {record.deliveredQuantity} L recorded
                     </div>
                   </div>

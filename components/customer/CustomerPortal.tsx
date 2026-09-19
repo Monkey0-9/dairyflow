@@ -130,6 +130,21 @@ export default function CustomerPortal({
 
   const handleConfirmPayment = async () => {
     if (!selectedInvoiceToPay || !payAmount) return;
+    const amt = parseFloat(payAmount);
+    const outstanding = Math.max(
+      0,
+      selectedInvoiceToPay.totalAmount - selectedInvoiceToPay.paidAmount
+    );
+    if (!Number.isFinite(amt) || amt <= 0) {
+      setPayError('Enter a valid settlement amount greater than ₹0.');
+      return;
+    }
+    if (amt > outstanding + 0.01) {
+      setPayError(
+        `Amount cannot exceed the outstanding balance of ₹${outstanding.toFixed(2)}.`
+      );
+      return;
+    }
     setIsPaying(true);
     setPayError(null);
     try {
@@ -358,8 +373,39 @@ export default function CustomerPortal({
                 Invoice #{selectedInvoiceToPay.invoiceNumber || selectedInvoiceToPay.id.slice(0, 8)}
               </div>
               <div className="text-xs text-slate-500 pt-1">
-                Outstanding: <span className="font-mono font-bold text-slate-900 dark:text-white">₹{payAmount}</span>
+                Outstanding:{' '}
+                <span className="font-mono font-bold text-slate-900 dark:text-white">
+                  ₹
+                  {Math.max(
+                    0,
+                    selectedInvoiceToPay.totalAmount - selectedInvoiceToPay.paidAmount
+                  ).toFixed(2)}
+                </span>
               </div>
+            </div>
+
+            <div>
+              <label
+                htmlFor="settlement-amount"
+                className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5"
+              >
+                Settlement Amount (₹)
+              </label>
+              <input
+                id="settlement-amount"
+                type="number"
+                step="0.01"
+                min="1"
+                max={Math.max(
+                  0,
+                  selectedInvoiceToPay.totalAmount - selectedInvoiceToPay.paidAmount
+                )}
+                required
+                value={payAmount}
+                onChange={(e) => setPayAmount(e.target.value)}
+                placeholder="e.g. 1250.00"
+                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-sm font-mono font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+              />
             </div>
 
             {upiUri && (

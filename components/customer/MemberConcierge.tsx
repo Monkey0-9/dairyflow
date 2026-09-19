@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { PauseRequest, ExtraMilkRequest } from '@/lib/types';
 import { Sheet } from '@/components/ui/Sheet';
 import { Button } from '@/components/ui/Button';
@@ -12,6 +12,7 @@ import {
   CheckCircle2,
   ShieldCheck,
   AlertCircle,
+  TrendingUp,
 } from 'lucide-react';
 
 interface MemberConciergeProps {
@@ -48,6 +49,21 @@ export function MemberConcierge({
   const [extraQty, setExtraQty] = useState('1.0');
   const [extraReason, setExtraReason] = useState('Dinner Party / Family Event');
 
+  // Daily Quota / Allocation Tier Form
+  const [qtyEffectiveDate, setQtyEffectiveDate] = useState('');
+  const [qtyNewQuantity, setQtyNewQuantity] = useState('1.0');
+  const [qtyReason, setQtyReason] = useState('Increase daily allocation');
+
+  // Keep sheet in sync when parent requests a specific sheet
+  // (e.g. "Adjust Allocation Tier" button on the Home tab).
+  useEffect(() => {
+    if (defaultSheet) {
+      setActiveSheet(defaultSheet);
+      setActionError(null);
+      setActionSuccess(null);
+    }
+  }, [defaultSheet]);
+
   const handleClose = () => {
     setActiveSheet(null);
     setActionError(null);
@@ -59,6 +75,10 @@ export function MemberConcierge({
     e.preventDefault();
     if (!pauseStartDate || !pauseEndDate) {
       setActionError('Departure date and return date are both required.');
+      return;
+    }
+    if (pauseStartDate > pauseEndDate) {
+      setActionError('Return date must be on or after the departure date.');
       return;
     }
     setIsSubmitting(true);
@@ -98,6 +118,11 @@ export function MemberConcierge({
       setActionError('Date and quantity are required.');
       return;
     }
+    const qty = parseFloat(extraQty);
+    if (!Number.isFinite(qty) || qty < 0.5 || qty > 20) {
+      setActionError('Additional quantity must be between 0.5 L and 20 L.');
+      return;
+    }
     setIsSubmitting(true);
     setActionError(null);
     try {
@@ -108,7 +133,7 @@ export function MemberConcierge({
           customerId,
           farmerId,
           date: extraDate,
-          requestedQuantity: parseFloat(extraQty),
+          requestedQuantity: qty,
           reason: extraReason,
         }),
       });
@@ -121,6 +146,51 @@ export function MemberConcierge({
         }, 1200);
       } else {
         setActionError(data.error || 'Failed to submit request.');
+      }
+    } catch {
+      setActionError('Connection error. Please retry.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleCreateQtyChange = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!qtyEffectiveDate || !qtyNewQuantity) {
+      setActionError('Effective date and new daily quantity are both required.');
+      return;
+    }
+    const qty = parseFloat(qtyNewQuantity);
+    if (!Number.isFinite(qty) || qty <= 0 || qty > 50) {
+      setActionError('New daily quantity must be between 0.5 L and 50 L.');
+      return;
+    }
+    setIsSubmitting(true);
+    setActionError(null);
+    setActionSuccess(null);
+    try {
+      const res = await fetch('/api/customer/quantity-request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          customerId,
+          farmerId,
+          effectiveDate: qtyEffectiveDate,
+          newQuantity: qty,
+          reason: qtyReason,
+        }),
+      });
+      const data = await res.json().catch(() => null);
+      if ((res.status === 200 || res.status === 201) && data?.success) {
+        setActionSuccess(
+          `Daily allocation change to ${qty} L from ${qtyEffectiveDate} submitted for estate approval.`
+        );
+        setTimeout(() => {
+          handleClose();
+          onRefresh();
+        }, 1200);
+      } else {
+        setActionError(data?.error || `Failed to submit allocation change (${res.status}).`);
       }
     } catch {
       setActionError('Connection error. Please retry.');
@@ -147,7 +217,7 @@ export function MemberConcierge({
             </p>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <Button
               variant="outline"
               size="sm"
@@ -163,6 +233,14 @@ export function MemberConcierge({
               leftIcon={<Sparkles className="w-3.5 h-3.5 text-emerald-400" />}
             >
               Request Extra Reserve
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setActiveSheet('qty')}
+              leftIcon={<TrendingUp className="w-3.5 h-3.5 text-blue-600" />}
+            >
+              Adjust Daily Qty
             </Button>
           </div>
         </div>
@@ -344,6 +422,71 @@ export function MemberConcierge({
               rightIcon={<Sparkles className="w-4 h-4" />}
             >
               Request Allocation
+            </Button>
+          </div>
+        </form>
+      </Sheet>
+
+      {/* Sheet 3: Daily Quantity / Allocation Tier */}
+      <Sheet
+        isOpen={activeSheet === 'qty'}
+        onClose={handleClose}
+        title="Adjust Daily Allocation Tier"
+        description="Modify your ongoing daily bottle quota. Changes apply from the effective date after estate approval."
+      >
+        <form onSubmit={handleCreateQtyChange} className="space-y-4">
+          {actionError && (
+            <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 text-xs rounded-xl flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{actionError}</span>
+            </div>
+          )}
+          {actionSuccess && (
+            <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs rounded-xl flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 shrink-0" />
+              <span>{actionSuccess}</span>
+            </div>
+          )}
+
+          <Input
+            label="Effective From Date"
+            type="date"
+            required
+            value={qtyEffectiveDate}
+            onChange={(e) => setQtyEffectiveDate(e.target.value)}
+          />
+
+          <Input
+            label="New Daily Quantity (Litres)"
+            type="number"
+            step="0.5"
+            min="0.5"
+            max="50"
+            required
+            value={qtyNewQuantity}
+            onChange={(e) => setQtyNewQuantity(e.target.value)}
+          />
+
+          <Input
+            label="Reason for Change"
+            type="text"
+            value={qtyReason}
+            onChange={(e) => setQtyReason(e.target.value)}
+            placeholder="e.g. Family visiting, increased need"
+          />
+
+          <div className="pt-2 flex items-center gap-3">
+            <Button variant="outline" onClick={handleClose} className="flex-1">
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              variant="primary"
+              isLoading={isSubmitting}
+              className="flex-1"
+              rightIcon={<TrendingUp className="w-4 h-4" />}
+            >
+              Submit Change
             </Button>
           </div>
         </form>

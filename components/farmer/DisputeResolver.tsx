@@ -70,13 +70,18 @@ export default function DisputeResolver({
   const handleCustomSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedDispute) return;
+    const qty = parseFloat(customQty);
+    if (!Number.isFinite(qty) || qty < 0 || qty > 50) {
+      setResolveError('Agreed quantity must be between 0 L and 50 L.');
+      return;
+    }
     setIsProcessing(true);
     setResolveError(null);
     try {
       await onResolveDispute(
         selectedDispute.id,
         'CUSTOM',
-        parseFloat(customQty),
+        qty,
         farmerNote || 'Custom settlement agreed with customer'
       );
       // Parent throws on failure — reaching here means the settlement saved.

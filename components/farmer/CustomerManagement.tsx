@@ -188,7 +188,22 @@ export default function CustomerManagement({
 
   const handleSubmitNewCustomer = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newName || !newPhone || !newQuantity) return;
+    if (!newName.trim() || !newPhone.trim() || !newQuantity) {
+      setFormError('Full name, mobile phone, and daily litres are all required.');
+      return;
+    }
+    const qty = parseFloat(newQuantity);
+    if (!Number.isFinite(qty) || qty <= 0 || qty > 50) {
+      setFormError('Daily litres must be between 0.5 L and 50 L.');
+      return;
+    }
+    if (newCustomPrice.trim() !== '') {
+      const cp = parseFloat(newCustomPrice);
+      if (!Number.isFinite(cp) || cp < 0) {
+        setFormError('Custom price must be a valid non-negative number.');
+        return;
+      }
+    }
     setIsSubmitting(true);
     setFormError(null);
     try {
@@ -249,7 +264,15 @@ export default function CustomerManagement({
 
   const handleSaveEditCustomer = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingCustomer || !editName || !editPhone) return;
+    if (!editingCustomer || !editName.trim() || !editPhone.trim()) {
+      setFormError('Full name and mobile phone are required to save changes.');
+      return;
+    }
+    const qty = parseFloat(editQuantity);
+    if (!Number.isFinite(qty) || qty <= 0 || qty > 50) {
+      setFormError('Daily litres must be between 0.5 L and 50 L.');
+      return;
+    }
     setIsSubmittingEdit(true);
     setFormError(null);
     try {

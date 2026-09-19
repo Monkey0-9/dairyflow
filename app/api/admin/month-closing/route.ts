@@ -25,9 +25,16 @@ export async function POST(req: NextRequest) {
     );
 
     if (checkRes.rows.length > 0 && checkRes.rows[0].status === 'FINALIZED') {
+      // Idempotent re-finalize: month is already locked, report success so
+      // retries / double-clicks / re-runs of the Month Closing form don't fail.
       return NextResponse.json(
-        { success: false, error: `Month ${month}/${year} is already finalized and locked.` },
-        { status: 400 }
+        {
+          success: true,
+          message: `Month ${month}/${year} is already finalized and locked.`,
+          monthClosing: checkRes.rows[0],
+          alreadyFinalized: true,
+        },
+        { status: 200 }
       );
     }
 

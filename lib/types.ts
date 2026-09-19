@@ -183,6 +183,7 @@ export interface DeliveryRecord {
   customerId: string;
   customerName: string;
   customerCode: string;
+  qrToken?: string;
   subscriptionId?: string;
   productId: string;
   productName: string;

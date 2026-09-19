@@ -73,13 +73,18 @@ export async function GET(req: NextRequest) {
 
     const dbRes = await query(sql, qParams);
     if (dbRes.rows.length > 0) {
-      records = dbRes.rows.map((r: any) => ({
-        id: r.id,
-        tenantId: r.tenantId,
-        customerId: r.customerId,
-        customerName: r.customerName,
-        customerCode: r.qrToken || 'MK-CLI',
-        farmerId: r.farmerId,
+      records = dbRes.rows.map((r: any, idx: number) => {
+        const cleanCode = r.qrToken && !r.qrToken.startsWith('MK_QR_') && !r.qrToken.startsWith('QR_') && r.qrToken.length <= 10
+          ? r.qrToken
+          : `MK-${String(idx + 1).padStart(3, '0')}`;
+        return {
+          id: r.id,
+          tenantId: r.tenantId,
+          customerId: r.customerId,
+          customerName: r.customerName,
+          customerCode: cleanCode,
+          qrToken: r.qrToken,
+          farmerId: r.farmerId,
         productId: r.productId,
         productName: r.productName || 'Fresh Milk',
         date: r.date,
@@ -93,7 +98,8 @@ export async function GET(req: NextRequest) {
         markedBy: 'FARMER' as const,
         notes: r.notes,
         updatedAt: new Date().toISOString(),
-      }));
+      };
+    });
     } else if (isTestMode()) {
       const store = getStore();
       records = store.getOrGenerateDailyLedger(targetDate);

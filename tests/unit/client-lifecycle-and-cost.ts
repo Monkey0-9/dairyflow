@@ -83,6 +83,13 @@ describe('Client Onboarding with Email & Password, Removal, and Milk Cost Manage
     const loginPhoneJson = await loginPhoneRes.json();
     expect(loginPhoneRes.status).toBe(200);
     expect(loginPhoneJson.success).toBe(true);
+
+    // Cleanup the created test customer so it does not persist into live database
+    await removeCustomer(
+      new NextRequest(`http://localhost:3000/api/customers?id=${addJson.customer.id}`, {
+        method: 'DELETE',
+      })
+    );
   });
 
   it('allows Farmer/Admin to remove a client and cancel their daily subscriptions', async () => {

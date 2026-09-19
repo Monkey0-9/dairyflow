@@ -206,7 +206,7 @@ export function EndOfDayClosingModal({
               <Lock className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
               <div>
                 <strong>Audit Lock:</strong> Finalizing this closing locks the delivery records for{' '}
-                {date}. Any subsequent edits will require an authorized adjustment.
+                {effectiveDate}. Any subsequent edits will require an authorized adjustment.
               </div>
             </div>
 

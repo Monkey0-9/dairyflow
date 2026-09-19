@@ -71,8 +71,7 @@ export default function BillingManager({
     if (!matchesSearch) return false;
 
     if (statusFilter === 'ALL') return true;
-    if (statusFilter === inv.status) return true;
-    return true;
+    return statusFilter === inv.status;
   });
 
   const handleOpenRecordPayment = (inv: Invoice) => {
@@ -85,6 +84,17 @@ export default function BillingManager({
   const handleConfirmPayment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeInvoiceForPay || !payAmount) return;
+    const amt = parseFloat(payAmount);
+    if (!Number.isFinite(amt) || amt <= 0) {
+      setPayError('Enter a valid payment amount greater than ₹0.');
+      return;
+    }
+    if (amt > activeInvoiceForPay.outstandingAmount + 0.01) {
+      setPayError(
+        `Amount cannot exceed the outstanding balance of ₹${activeInvoiceForPay.outstandingAmount.toFixed(2)}.`
+      );
+      return;
+    }
     setIsProcessing(true);
     setPayError(null);
     try {
