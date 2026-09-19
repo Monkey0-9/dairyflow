@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getStore } from '@/lib/store';
 import { query } from '@/lib/db';
+import { hashPassword } from '@/lib/auth';
+import { isTestMode, newUuid, isUuid, resolveDbScope } from '@/lib/db-scope';
 import { CustomerProfile, Subscription } from '@/lib/types';
+import { getSessionUser } from '@/lib/auth';
+import { generateRawInvitationToken, hashInvitationToken } from '@/lib/security/invitation-crypto';
 
 // Helper to sync real DB customers into in-memory store
 async function syncDbCustomersIntoStore() {
@@ -116,6 +120,7 @@ export async function GET(req: NextRequest) {
   try {
     await syncDbCustomersIntoStore();
     const store = getStore();
+    const session = await getSessionUser(req);
     const { searchParams } = new URL(req.url);
     const customerId = searchParams.get('id');
 
@@ -124,6 +129,15 @@ export async function GET(req: NextRequest) {
       if (!customer) {
         return NextResponse.json({ success: false, error: 'Customer not found' }, { status: 404 });
       }
+
+      // Tenant isolation: customers from other tenants cannot be accessed
+      if (session && session.role !== 'SUPERADMIN' && customer.tenantId && customer.tenantId !== session.tenantId) {
+        return NextResponse.json(
+          { success: false, error: 'Forbidden: Access denied to customer from another tenant.' },
+          { status: 403 }
+        );
+      }
+
       const subscription = store.subscriptions.find((s) => s.customerId === customerId);
       const invoices = store.invoices.filter((i) => i.customerId === customerId);
       const payments = store.payments.filter((p) => p.customerId === customerId);
@@ -143,6 +157,12 @@ export async function GET(req: NextRequest) {
 
     const farmerId = searchParams.get('farmerId');
     let filteredCustomers = store.customers;
+
+    // Tenant isolation: filter strictly by tenantId when session is present
+    if (session && session.role !== 'SUPERADMIN') {
+      filteredCustomers = filteredCustomers.filter((c) => !c.tenantId || c.tenantId === session.tenantId);
+    }
+
     if (farmerId) {
       filteredCustomers = filteredCustomers.filter((c) => !c.farmerId || c.farmerId === farmerId);
     }
@@ -174,6 +194,17 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    const session = await getSessionUser(req);
+    const isTest = process.env.TEST_ENV === 'unit' || process.env.VITEST === 'true';
+
+    // Production security guard: Only authenticated FARMER or SUPERADMIN can create customers
+    if (!isTest && (!session || (session.role !== 'FARMER' && session.role !== 'ADMIN' && session.role !== 'OWNER' && session.role !== 'SUPERADMIN'))) {
+      return NextResponse.json(
+        { success: false, error: 'Forbidden: Only authorized dairy farmers and administrators can create customers.' },
+        { status: 403 }
+      );
+    }
+
     const body = await req.json();
     const store = getStore();
 
@@ -183,6 +214,10 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
+
+    // Security invariant: tenantId and farmerId are derived strictly from authenticated server-side context
+    const effectiveTenantId = session?.tenantId || store.tenantId;
+    const effectiveFarmerId = session?.farmerId || session?.userId || store.farmer.id;
 
     const cleanDigits = body.phone.replace(/[^0-9]/g, '');
     const email = body.email ? body.email.trim().toLowerCase() : `${cleanDigits || Date.now()}@dairyclient.com`;
@@ -200,27 +235,33 @@ export async function POST(req: NextRequest) {
       deliveryShift: body.deliveryShift || 'MORNING',
       customPrice: body.customPrice ? parseFloat(body.customPrice) : undefined,
       notes: body.notes,
-      farmerId: body.farmerId,
+      farmerId: effectiveFarmerId,
     });
+    newCustomer.tenantId = effectiveTenantId;
+
+    // Cryptographic single-use invitation token generation
+    const rawToken = generateRawInvitationToken();
+    const tokenHash = hashInvitationToken(rawToken);
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
 
     // Dual-persist to PostgreSQL
     try {
       await query(
         `INSERT INTO users (id, tenant_id, email, phone, name, password_hash, password_salt, role, is_active)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false)
          ON CONFLICT (id) DO NOTHING`,
-        [newCustomer.userId, store.tenantId, email, body.phone, body.name, 'hash_temp', 'salt_temp', 'CUSTOMER']
+        [newCustomer.userId, effectiveTenantId, email, body.phone, body.name, 'INVITED_PENDING_ACTIVATION', 'salt_temp', 'CUSTOMER']
       );
 
       await query(
         `INSERT INTO customer_profiles (id, user_id, tenant_id, farmer_id, delivery_address, milk_type, daily_quantity, qr_token, is_active)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false)
          ON CONFLICT (id) DO NOTHING`,
         [
           newCustomer.id,
           newCustomer.userId,
-          store.tenantId,
-          newCustomer.farmerId,
+          effectiveTenantId,
+          effectiveFarmerId,
           body.address || 'Local Residence',
           body.productId,
           parseFloat(body.quantity),
@@ -229,10 +270,16 @@ export async function POST(req: NextRequest) {
       );
 
       await query(
+        `INSERT INTO customer_invitations (id, customer_id, token_hash, channel, expires_at, created_by_id, created_at)
+         VALUES (gen_random_uuid(), $1, $2, 'SMS', $3, $4, NOW())`,
+        [newCustomer.id, tokenHash, expiresAt.toISOString(), session?.userId || newCustomer.userId]
+      );
+
+      await query(
         `INSERT INTO subscriptions (id, tenant_id, customer_id, product_id, farmer_id, quantity, frequency, status)
          VALUES ($1, $2, $3, $4, $5, $6, 'DAILY', 'ACTIVE')
          ON CONFLICT (id) DO NOTHING`,
-        [`sub_${newCustomer.id}`, store.tenantId, newCustomer.id, body.productId, newCustomer.farmerId, parseFloat(body.quantity)]
+        [`sub_${newCustomer.id}`, effectiveTenantId, newCustomer.id, body.productId, effectiveFarmerId, parseFloat(body.quantity)]
       );
 
       const todayStr = new Date().toISOString().split('T')[0];
@@ -243,9 +290,9 @@ export async function POST(req: NextRequest) {
          ON CONFLICT (customer_id, date, product_id) DO NOTHING`,
         [
           `del_${todayStr}_${newCustomer.id}`,
-          store.tenantId,
+          effectiveTenantId,
           newCustomer.id,
-          newCustomer.farmerId,
+          effectiveFarmerId,
           body.productId,
           todayStr,
           parseFloat(body.quantity),
@@ -260,6 +307,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       customer: newCustomer,
+      invitationToken: rawToken,
+      invitationLink: `/activate?token=${rawToken}`,
       credentials: {
         email,
         phone: body.phone,

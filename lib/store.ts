@@ -66,7 +66,13 @@ export class MilkFlowStore {
       qrPayload: 'upi://pay?pa=prakash@okaxis&pn=GreenValley%20Dairy&cu=INR',
     };
 
-    this.initDemoData();
+    // Production Safety Guard: Demo data is strictly prohibited in production.
+    // It is ONLY populated during automated test suites or if explicitly requested in non-production environments.
+    const isTest = process.env.NODE_ENV === 'test' || process.env.VITEST === 'true' || process.env.TEST_ENV === 'unit';
+    const isDevWithDemo = process.env.NODE_ENV !== 'production' && process.env.ENABLE_DEMO_DATA === 'true';
+    if (isTest || isDevWithDemo) {
+      this.initDemoData();
+    }
   }
 
   // Cryptographic SHA-256 Hash Chain Engine

@@ -61,3 +61,22 @@ export async function withLock<T>(
     await releaseLock(resourceKey, token);
   }
 }
+
+/**
+ * Acquire distributed lock object with release handle.
+ */
+export async function acquireDistributedLock(
+  resourceKey: string,
+  ttlMs = 30000
+): Promise<{ token: string | null; release: () => Promise<void> }> {
+  const ttlSeconds = Math.max(1, Math.ceil(ttlMs / 1000));
+  const token = await acquireLock(resourceKey, ttlSeconds);
+  return {
+    token,
+    release: async () => {
+      if (token) {
+        await releaseLock(resourceKey, token);
+      }
+    },
+  };
+}

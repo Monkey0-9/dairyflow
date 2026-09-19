@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser, hashPassword, verifyPassword } from '@/lib/auth';
 import { query, transaction } from '@/lib/db';
-import crypto from 'crypto';
 
 export async function POST(req: NextRequest) {
   try {
@@ -48,14 +47,14 @@ export async function POST(req: NextRequest) {
     if (!isCurrentValid) {
       return NextResponse.json(
         { success: false, error: 'The current password you entered is incorrect.' },
-        { status: 400 }
+        { status: 401 }
       );
     }
 
     // 3. Hash new password with scrypt
     const { hash: newHash, salt: newSalt } = hashPassword(newPassword);
 
-    // 4. Update password inside a transaction and log audit block
+    // 4. Update password inside a transaction and log cryptographic audit block
     await transaction(async (client) => {
       await client.query(
         `UPDATE users
@@ -63,41 +62,23 @@ export async function POST(req: NextRequest) {
          WHERE id = $3`,
         [newHash, newSalt, session.userId]
       );
-
-      // Fetch last audit block hash for cryptographic continuity
-      const lastAuditRes = await client.query<{ current_hash: string; block_index: number }>(
-        `SELECT current_hash, block_index FROM audit_blocks ORDER BY block_index DESC LIMIT 1`
-      );
-
-      const previousHash = lastAuditRes.rows[0]?.current_hash || '0000000000000000000000000000000000000000000000000000000000000000';
-      const blockIndex = (lastAuditRes.rows[0]?.block_index ?? -1) + 1;
-      const timestamp = new Date().toISOString();
-      const auditId = `audit_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
-
-      const rawBlock = `${blockIndex}|${timestamp}|USER|${session.userId}|PASSWORD_CHANGED|${previousHash}`;
-      const currentHash = crypto.createHash('sha256').update(rawBlock).digest('hex');
-
-      await client.query(
-        `INSERT INTO audit_blocks (
-           id, block_index, timestamp, entity_type, entity_id, action,
-           actor_id, actor_name, actor_role, before_state, after_state,
-           previous_hash, current_hash
-         ) VALUES ($1, $2, $3, 'USER', $4, 'PASSWORD_CHANGED', $5, $6, $7, $8, $9, $10, $11)`,
-        [
-          auditId,
-          blockIndex,
-          timestamp,
-          session.userId,
-          session.userId,
-          session.name,
-          session.role,
-          JSON.stringify({ passwordUpdated: false }),
-          JSON.stringify({ passwordUpdated: true, timestamp }),
-          previousHash,
-          currentHash,
-        ]
-      );
     });
+
+    try {
+      const { appendAuditLog } = await import('@/lib/services/audit.service');
+      await appendAuditLog({
+        tenantId: userRow.tenant_id,
+        actorId: session.userId,
+        actorRole: userRow.role,
+        entityType: 'USER',
+        entityId: session.userId,
+        action: 'USER_PASSWORD_CHANGED',
+        beforeState: { passwordUpdated: false },
+        afterState: { passwordUpdated: true, timestamp: new Date().toISOString() },
+      });
+    } catch (auditErr) {
+      console.warn('[ChangePassword] Audit log warning:', auditErr);
+    }
 
     return NextResponse.json({
       success: true,

@@ -498,15 +498,15 @@ export default function CustomerManagement({
                   {/* Financial Status Summary */}
                   <div className="mt-3 pt-3 border-t border-slate-100 grid grid-cols-3 gap-2 text-center text-xs">
                     <div>
-                      <div className="text-[10px] text-slate-400 font-bold uppercase">Sep Milk</div>
+                      <div className="text-[10px] text-slate-400 font-bold uppercase">This Month</div>
                       <div className="font-mono font-bold text-slate-800 mt-0.5">
-                        {c.currentInvoice ? `${c.currentInvoice.totalQuantity} L` : '27.0 L'}
+                        {c.currentInvoice ? `${c.currentInvoice.totalQuantity} L` : '0.0 L'}
                       </div>
                     </div>
                     <div>
                       <div className="text-[10px] text-slate-400 font-bold uppercase">Bill</div>
                       <div className="font-mono font-bold text-slate-800 mt-0.5">
-                        ₹{c.currentInvoice ? c.currentInvoice.totalAmount : '1,350'}
+                        ₹{c.currentInvoice ? c.currentInvoice.totalAmount : '0'}
                       </div>
                     </div>
                     <div>
@@ -516,7 +516,7 @@ export default function CustomerManagement({
                           (c.currentInvoice?.outstandingAmount || 0) > 0 ? 'text-rose-600' : 'text-emerald-600'
                         }`}
                       >
-                        ₹{c.currentInvoice ? c.currentInvoice.outstandingAmount : '350'}
+                        ₹{c.currentInvoice ? c.currentInvoice.outstandingAmount : '0'}
                       </div>
                     </div>
                   </div>
@@ -634,27 +634,31 @@ export default function CustomerManagement({
 
               {/* Monthly Consumption Breakdown */}
               <div>
-                <h4 className="font-extrabold text-slate-900 text-xs mb-2">Historical Milk Consumption</h4>
-                <div className="grid grid-cols-4 gap-2 text-center">
+                <h4 className="font-extrabold text-slate-900 text-xs mb-2">Delivery & Billing Overview</h4>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
                   <div className="p-3 rounded-2xl bg-emerald-50 border border-emerald-200">
-                    <span className="text-[10px] font-bold text-emerald-800 uppercase">Today (16 Sep)</span>
+                    <span className="text-[10px] font-bold text-emerald-800 uppercase">Daily Scheduled</span>
                     <div className="text-lg font-black text-emerald-950 mt-1 font-mono">
-                      {selectedCust360.id === 'cust_manju' ? '0.0 L' : `${selectedCust360.subscription?.defaultQuantity || 1.0} L`}
+                      {selectedCust360.accountStatus === 'PAUSED' ? '0.0 L' : `${selectedCust360.subscription?.defaultQuantity || 1.0} L`}
                     </div>
                   </div>
                   <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200">
-                    <span className="text-[10px] font-bold text-slate-500 uppercase">Sep 2026</span>
+                    <span className="text-[10px] font-bold text-slate-500 uppercase">Delivered This Month</span>
                     <div className="text-lg font-black text-slate-900 mt-1 font-mono">
-                      {selectedCust360.currentInvoice?.totalQuantity || 27.0} L
+                      {selectedCust360.currentInvoice?.totalQuantity ? `${selectedCust360.currentInvoice.totalQuantity} L` : '0.0 L'}
                     </div>
                   </div>
                   <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200">
-                    <span className="text-[10px] font-bold text-slate-500 uppercase">Aug 2026</span>
-                    <div className="text-lg font-black text-slate-900 mt-1 font-mono">29.0 L</div>
+                    <span className="text-[10px] font-bold text-slate-500 uppercase">Current Month Bill</span>
+                    <div className="text-lg font-black text-slate-900 mt-1 font-mono">
+                      ₹{selectedCust360.currentInvoice?.totalAmount || '0'}
+                    </div>
                   </div>
                   <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200">
-                    <span className="text-[10px] font-bold text-slate-500 uppercase">Jul 2026</span>
-                    <div className="text-lg font-black text-slate-900 mt-1 font-mono">30.0 L</div>
+                    <span className="text-[10px] font-bold text-slate-500 uppercase">Outstanding Balance</span>
+                    <div className="text-lg font-black text-rose-600 mt-1 font-mono">
+                      ₹{selectedCust360.currentInvoice?.outstandingAmount || '0'}
+                    </div>
                   </div>
                 </div>
               </div>

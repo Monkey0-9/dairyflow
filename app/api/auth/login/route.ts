@@ -75,7 +75,9 @@ async function verifyDbCredentials(
       );
     }
 
-    if (res.rows.length === 0) return null;
+    if (res.rows.length === 0) {
+      return { error: 'No account found with these credentials. Please check or register.', status: 401 };
+    }
     const row = res.rows[0];
 
     // Password verification
@@ -107,8 +109,9 @@ async function verifyDbCredentials(
         email: row.email,
       },
     };
-  } catch {
-    return null; // DB unreachable -> caller falls back
+  } catch (dbErr: unknown) {
+    console.error('[verifyDbCredentials] Database connection error:', dbErr);
+    return { error: 'Database service is temporarily unavailable. Please try again later.', status: 503 };
   }
 }
 
@@ -166,8 +169,15 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // 2) Store fallback (dev, tests, or DB unreachable)
+      // 2) Store fallback (strictly isolated to unit tests without live database)
       if (!sessionUser) {
+        if (!isUnitTest()) {
+          return NextResponse.json(
+            { success: false, error: 'Database service is temporarily unavailable or credentials invalid.' },
+            { status: 503 }
+          );
+        }
+
         const cleanIdent = userIdentifier.toLowerCase();
         const user = store.users.find(
           (u) =>
