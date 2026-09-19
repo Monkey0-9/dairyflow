@@ -14,19 +14,20 @@ import { MemberHome } from './MemberHome';
 import { MemberStatements } from './MemberStatements';
 import { MemberConcierge } from './MemberConcierge';
 import { MemberQR } from './MemberQR';
+import { MemberProfile } from './MemberProfile';
 import InvoiceModal from '../common/InvoiceModal';
 import ReceiptModal from '../common/ReceiptModal';
 import { useMilkFlowEvents, playNotificationChime } from '@/lib/use-milkflow-events';
 import type { MilkFlowEvent } from '@/lib/events';
 import { Button } from '@/components/ui/Button';
-import { Droplets, CreditCard, ShieldCheck, Sparkles, QrCode, FileText, CheckCircle2 } from 'lucide-react';
+import { Droplets, CreditCard, ShieldCheck, Sparkles, QrCode, FileText, CheckCircle2, User } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
 interface CustomerPortalProps {
   currentUserId: string;
   customers: CustomerProfile[];
   onRefreshAll: () => void;
-  initialTab?: 'HOME' | 'STATEMENTS' | 'CONCIERGE' | 'QR';
+  initialTab?: 'HOME' | 'STATEMENTS' | 'CONCIERGE' | 'QR' | 'PROFILE';
 }
 
 export default function CustomerPortal({
@@ -39,7 +40,7 @@ export default function CustomerPortal({
   const [pauseRequests, setPauseRequests] = useState<PauseRequest[]>([]);
   const [milkRequests, setMilkRequests] = useState<ExtraMilkRequest[]>([]);
   const [todayRecord, setTodayRecord] = useState<DeliveryRecord | null>(null);
-  const [activeTab, setActiveTab] = useState<'HOME' | 'STATEMENTS' | 'CONCIERGE' | 'QR'>(initialTab);
+  const [activeTab, setActiveTab] = useState<'HOME' | 'STATEMENTS' | 'CONCIERGE' | 'QR' | 'PROFILE'>(initialTab as any);
   const [conciergeInitialSheet, setConciergeInitialSheet] = useState<'pause' | 'extra' | 'qty' | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -273,6 +274,19 @@ export default function CustomerPortal({
             <QrCode className="w-3.5 h-3.5" />
             <span>Client Pass</span>
           </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('PROFILE')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+              activeTab === 'PROFILE'
+                ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-950 shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-900'
+            }`}
+          >
+            <User className="w-3.5 h-3.5" />
+            <span>Profile</span>
+          </button>
         </div>
       </div>
 
@@ -322,6 +336,8 @@ export default function CustomerPortal({
           customerName={currentCustomer.name}
         />
       )}
+
+      {activeTab === 'PROFILE' && <MemberProfile />}
 
       {/* Invoice Details Modal */}
       {showInvoiceModal && (

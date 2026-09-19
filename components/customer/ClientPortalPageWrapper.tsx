@@ -8,7 +8,7 @@ import { CustomerProfile } from '@/lib/types';
 import Link from 'next/link';
 
 interface ClientPortalPageWrapperProps {
-  initialTab: 'HOME' | 'STATEMENTS' | 'CONCIERGE' | 'QR';
+  initialTab: 'HOME' | 'STATEMENTS' | 'CONCIERGE' | 'QR' | 'PROFILE';
 }
 
 export default function ClientPortalPageWrapper({ initialTab }: ClientPortalPageWrapperProps) {

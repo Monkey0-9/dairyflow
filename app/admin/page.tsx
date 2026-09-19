@@ -29,6 +29,7 @@ import AuditTrailViewer from '@/components/farmer/AuditTrailViewer';
 import DeliveryRouteView from '@/components/farmer/DeliveryRouteView';
 import InventoryManager from '@/components/farmer/InventoryManager';
 import CustomerRequestsManager from '@/components/farmer/CustomerRequestsManager';
+import OpsConsole from '@/components/farmer/OpsConsole';
 import { BottomNav } from '@/components/ui/BottomNav';
 import {
   Droplets,
@@ -753,6 +754,15 @@ export default function AdminPage() {
 
             {activeTab === 'pricing' && <ProductPricing products={products} />}
 
+            {activeTab === 'ops' && (
+              <OpsConsole
+                customers={customers}
+                products={products}
+                invoices={invoices}
+                onRefresh={loadAdminData}
+              />
+            )}
+
             {activeTab === 'forecast' && <AIForecastingView />}
 
             {activeTab === 'audit' && <AuditTrailViewer />}
@@ -856,6 +866,15 @@ export default function AdminPage() {
                       <CheckCircle2 className="w-5 h-5 text-emerald-600 mb-2" />
                       <div className="font-extrabold text-xs text-slate-900">Audit Trail</div>
                       <span className="text-[11px] text-slate-500">Cryptographic log</span>
+                    </button>
+
+                    <button
+                      onClick={() => setActiveTab('ops')}
+                      className="p-4 rounded-2xl border border-slate-900 bg-slate-900 hover:bg-slate-800 text-left transition cursor-pointer shadow-2xs"
+                    >
+                      <Layers className="w-5 h-5 text-amber-400 mb-2" />
+                      <div className="font-extrabold text-xs text-white">Operations Console</div>
+                      <span className="text-[11px] text-slate-400">Import • Merge • Transfers • Adjustments • Routes • Closings</span>
                     </button>
                   </div>
                 </div>

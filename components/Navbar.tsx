@@ -410,7 +410,7 @@ export default function Navbar({
               <button
                 onClick={() => onTabChange('more')}
                 className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition relative ${
-                  activeTab === 'more' || activeTab === 'pricing' || activeTab === 'forecast' || activeTab === 'audit' || activeTab === 'routes' || activeTab === 'calendar' || activeTab === 'disputes'
+                  activeTab === 'more' || activeTab === 'pricing' || activeTab === 'forecast' || activeTab === 'audit' || activeTab === 'routes' || activeTab === 'calendar' || activeTab === 'disputes' || activeTab === 'ops' || activeTab === 'inventory'
                     ? 'bg-emerald-600 text-white font-semibold shadow-xs'
                     : 'text-slate-600 hover:bg-white hover:text-slate-900'
                 }`}
