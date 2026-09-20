@@ -179,11 +179,11 @@ export async function POST(req: NextRequest) {
         }
 
         const cleanIdent = userIdentifier.toLowerCase();
+        const digits = userIdentifier.replace(/[^0-9]/g, '');
         const user = store.users.find(
           (u) =>
-            u.email?.toLowerCase() === cleanIdent ||
-            u.phone.includes(userIdentifier) ||
-            u.phone.replace(/[^0-9]/g, '').includes(userIdentifier.replace(/[^0-9]/g, ''))
+            (u.email && u.email.toLowerCase() === cleanIdent) ||
+            (digits.length >= 10 && u.phone && u.phone.replace(/[^0-9]/g, '').includes(digits))
         );
 
         if (user) {

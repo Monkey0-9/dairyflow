@@ -10,12 +10,10 @@ import {
 import { checkRateLimit } from '@/lib/security/rate-limiter';
 import { sendPaymentReminder } from '@/lib/notify/provider';
 import { publishEvent } from '@/lib/events';
-import { POST as createOrderHandler } from '@/app/api/payments/create-order/route';
 import { POST as quantityRequestHandler } from '@/app/api/customer/quantity-request/route';
 import { GET as eventsHandler } from '@/app/api/events/route';
 import { GET as dailyCheckHandler } from '@/app/api/cron/daily-check/route';
 import { GET as monthlyBillingHandler } from '@/app/api/cron/monthly-billing/route';
-import crypto from 'crypto';
 
 describe('Production Launch Readiness — Vercel, Live Payments, Crons & Security', () => {
   describe('1. Session Management & Cryptographic Security', () => {

@@ -83,7 +83,6 @@ function calculateModelMetrics(dailyActuals: number[], baseCapacity: number): AI
 
 export async function generateAIDemandForecast(tenantId?: string): Promise<ComprehensiveForecast> {
   const todayDate = new Date();
-  const todayStr = todayDate.toISOString().split('T')[0];
 
   const tomorrow = new Date(todayDate);
   tomorrow.setDate(tomorrow.getDate() + 1);

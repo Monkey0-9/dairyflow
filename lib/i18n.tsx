@@ -247,19 +247,25 @@ const Ctx = createContext<LangContext>({
 });
 
 export function LanguageProvider({ children }: { children: React.ReactNode }) {
-  const [lang, setLangState] = useState<UILang>('en');
+  const [lang, setLangState] = useState<UILang>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem(STORAGE_KEY) as UILang | null;
+        if (saved && I18N_LANGS.includes(saved)) {
+          return saved;
+        }
+      } catch {
+        // localStorage may be disabled
+      }
+    }
+    return 'en';
+  });
 
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY) as UILang | null;
-      if (saved && I18N_LANGS.includes(saved)) {
-        setLangState(saved);
-        document.documentElement.lang = saved;
-      }
-    } catch {
-      // localStorage may be disabled
+    if (typeof document !== 'undefined') {
+      document.documentElement.lang = lang;
     }
-  }, []);
+  }, [lang]);
 
   const setLang = useCallback((l: UILang) => {
     setLangState(l);

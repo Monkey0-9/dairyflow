@@ -61,6 +61,8 @@ async function migrate() {
       daily_quantity NUMERIC(5,2) DEFAULT 1.0,
       qr_token VARCHAR(128) UNIQUE NOT NULL,
       is_active BOOLEAN DEFAULT true,
+      status VARCHAR(32) DEFAULT 'INVITED',
+      transfer_status VARCHAR(32) DEFAULT 'NONE',
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW()
     );`,
@@ -531,6 +533,8 @@ async function migrate() {
     `DO $$ BEGIN
       ALTER TABLE quantity_change_requests ADD CONSTRAINT chk_qc_qty CHECK (new_quantity >= 0);
     EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
+    `ALTER TABLE customer_profiles ADD COLUMN IF NOT EXISTS status VARCHAR(32) DEFAULT 'INVITED';`,
+    `ALTER TABLE customer_profiles ADD COLUMN IF NOT EXISTS transfer_status VARCHAR(32) DEFAULT 'NONE';`,
   ];
 
   for (const ddl of ddlStatements) {

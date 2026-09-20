@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getStore } from '@/lib/store';
 import { query } from '@/lib/db';
-import { hashPassword } from '@/lib/auth';
 import { isTestMode, newUuid, isUuid, resolveDbScope } from '@/lib/db-scope';
 import { CustomerProfile, Subscription } from '@/lib/types';
 import { getSessionUser } from '@/lib/auth';
@@ -267,8 +266,8 @@ export async function POST(req: NextRequest) {
       );
 
       await query(
-        `INSERT INTO customer_profiles (id, user_id, tenant_id, farmer_id, delivery_address, milk_type, daily_quantity, qr_token, is_active)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false)
+        `INSERT INTO customer_profiles (id, user_id, tenant_id, farmer_id, delivery_address, milk_type, daily_quantity, qr_token, is_active, status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false, 'INVITED')
          ON CONFLICT (id) DO NOTHING`,
         [
           newCustomer.id,

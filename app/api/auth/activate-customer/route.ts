@@ -73,7 +73,7 @@ export async function POST(req: NextRequest) {
         [hash, salt, cust.userId]
       );
       await client.query(
-        `UPDATE customer_profiles SET is_active = true, updated_at = NOW() WHERE id = $1`,
+        `UPDATE customer_profiles SET is_active = true, status = 'ACTIVE', updated_at = NOW() WHERE id = $1`,
         [cust.customerId]
       );
       await client.query(

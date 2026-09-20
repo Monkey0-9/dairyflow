@@ -1,0 +1,2598 @@
+MILKFLOW
+
+Software Requirements Specification (SRS)
+
+Digital Dairy Management, Delivery, Billing, Payments & Governance Platform
+
+Document status:  Controlled requirements baseline for development, verification, client acceptance, and production rollout. This SRS defines the target system behavior; implementation status must be verified separately against the repository and deployed environment.
+
+Document Attribute
+
+Value
+
+Document ID
+
+MF-SRS-001
+
+Version
+
+1.0
+
+
+Date
+
+20 September 2026
+
+Project
+
+MilkFlow / DairyFlow
+
+Product Type
+
+Multi-tenant SaaS/web application for dairy operations
+
+Primary Region
+
+India; timezone and currency configurable, default IST / INR
+
+Reference Requirements Standard
+
+ISO/IEC/IEEE 29148:2018
+
+System of Record
+
+PostgreSQL database
+
+Primary Application
+
+Next.js App Router web application
+
+Deployment Target
+
+Managed cloud deployment with PostgreSQL, Redis and external payment/notification providers
+
+Prepared for implementation on the main branch and subsequent real-client deployment.
+
+Document Control
+
+Version
+
+Date
+
+Author / Owner
+
+Change Summary
+
+Approval
+
+1.0
+
+20-Sep-2026
+
+MilkFlow Project Team
+
+Initial complete A-to-Z requirements baseline for production-oriented implementation.
+
+Pending project approval
+
+Approval Sign-off
+
+Role
+
+Name
+
+Signature
+
+Date
+
+Project Owner / Product Owner
+
+Technical Lead
+
+Faculty / Project Guide
+
+Client / Dairy Operator
+
+Requirements Conventions
+
+“Shall” indicates a mandatory requirement for acceptance.
+
+“Should” indicates a recommended requirement subject to approved scope.
+
+“May” indicates an optional enhancement that does not block baseline acceptance.
+
+FR = Functional Requirement; NFR = Non-Functional Requirement; BR = Business Rule; DR = Data Requirement; SEC = Security Requirement; INT = Interface Requirement; OPS = Operational Requirement; AI = AI/Analytics Requirement.
+
+Each requirement is intended to be uniquely testable and traceable to one or more verification cases.
+
+Table of Contents
+
+1. Introduction
+
+2. Overall Description
+
+3. Functional Requirements
+
+4. Business Rules and Domain Invariants
+
+5. Data Requirements
+
+6. External Interface Requirements
+
+7. Security Requirements
+
+8. Non-Functional Requirements
+
+9. Privacy & Data Governance
+
+10. Analytics & AI Requirements
+
+11. Logging, Observability & Monitoring
+
+12. State Machines
+
+13. Use Cases
+
+14. End-to-End Business Flows
+
+15. Validation, Error Handling & API Error Contracts
+
+16. Verification & Testing Requirements
+
+17. Deployment & Operational Requirements
+
+18. Backup, Disaster Recovery & Business Continuity
+
+19. Data Flow / Interaction Summary
+
+20. Requirement Traceability Matrix
+
+21. Implementation Alignment & Current-State Gap Register
+
+22. Production Readiness Checklist
+
+Appendix A. Suggested Permission Matrix
+
+Appendix B. Recommended API Contract Pattern
+
+Appendix C. Recommended Repository Controls
+
+Appendix D. Minimum Client Acceptance Journey
+
+Appendix E. Requirement Quality Rules
+
+Word note:  This SRS uses a static contents list for predictable PDF rendering. Heading styles are still applied throughout the document for navigation and future editing.
+
+1. Introduction
+
+1.1 Purpose
+
+This Software Requirements Specification defines the functional, non-functional, data, security, interface, operational, and acceptance requirements for MilkFlow, a multi-tenant digital dairy management platform. The system is intended to replace fragmented manual registers, spreadsheets, messaging-based workflows, and informal payment tracking with a controlled operational system covering customer onboarding, subscriptions, daily delivery, billing, payments, inventory, notifications, auditability, analytics, and governed AI assistance.
+
+1.2 Product Vision
+
+MilkFlow shall provide one authoritative business workflow from customer relationship creation through subscription, expected delivery, actual delivery, exception handling, invoice generation, payment reconciliation, and audit. The system shall prioritize correctness, tenant isolation, traceability, operational usability, and safe handling of financial and personal data.
+
+Customer onboarding -> Invitation -> Activation -> Subscription -> Expected delivery      -> Actual delivery -> Adjustment/Dispute -> Billable quantity      -> Invoice -> Payment -> Receipt -> Audit / Reporting
+
+1.3 Scope of This SRS
+
+This SRS covers the complete target platform, including the operational portal for dairy owners and staff, the customer portal, platform administration, authentication, role and tenant authorization, data management, delivery routes, pricing and subscription versioning, billing, payment gateway integration, inventory/day closing, notifications, QR delivery verification, analytics, governed AI, observability, security controls, privacy controls, disaster recovery, deployment, testing, and acceptance.
+
+1.4 Intended Audience
+
+Project owner / dairy operator: validates business processes and acceptance criteria.
+
+Project guide / faculty reviewer: evaluates scope, requirements quality, traceability, and engineering depth.
+
+Developers: implement frontend, backend, database, security, integrations, and automation.
+
+QA / security reviewers: derive test cases from functional, non-functional, and security requirements.
+
+Operations / deployment team: deploy, monitor, back up, recover, and maintain the service.
+
+Future client users: farmers, managers, delivery personnel, accountants, support staff, and customers.
+
+1.5 Reference Basis
+
+This SRS is based on the project repository structure and documentation, the project’s dairy-operations/domain implementation plan, the existing relational data model, API and security specifications, and the project’s stated production-readiness objectives. The repository presently describes a Next.js App Router application, PostgreSQL/Neon persistence, Prisma, role-based access, signed sessions, payment webhooks, a hash-chained audit mechanism, and customer/farmer portals. These statements are treated as design/source inputs; implementation claims are not treated as proof of production readiness.
+
+1.6 References
+
+ISO/IEC/IEEE 29148:2018, Systems and software engineering - Life cycle processes - Requirements engineering.
+
+MilkFlow repository: https://github.com/Monkey0-9/dairyflow
+
+Project architecture specification: docs/architecture/ARCHITECTURE.md
+
+Project API reference: docs/architecture/API.md
+
+Project database specification: docs/architecture/DATABASE.md
+
+Project security specification: docs/compliance/SECURITY.md
+
+Project threat model: docs/compliance/THREAT_MODEL.md
+
+Project deployment and testing documentation: docs/operations/DEPLOYMENT.md and docs/operations/TESTING.md
+
+MilkFlow Dairy Operations Architecture & Domain Implementation Plan, project-controlled design baseline.
+
+2. Overall Description
+
+2.1 Product Perspective
+
+MilkFlow is a cloud-deployed, multi-tenant web application. A tenant represents a dairy business or operating organization. Within a tenant, one or more owners/managers/staff manage products, prices, customers, subscriptions, routes, deliveries, invoices, payments, inventory, and operational requests. Customers use an invitation-activated portal tied to their assigned dairy relationship. A platform-level SuperAdmin can monitor tenant health and platform governance without becoming a participant in tenant business operations.
+
+2.2 High-Level Architecture
+
++------------------------------ PRESENTATION -------------------------------+| Customer Portal | Owner/Admin Portal | Staff Views | SuperAdmin | Auth UI |+-----------------------------------+--------------------------------------+                                    | HTTPS / JSON / SSE+-----------------------------------v--------------------------------------+|                         API & AUTHORIZATION GATE                         || Session verification | RBAC | Tenant scope | Ownership | Validation | WAF |+-----------------------------------+--------------------------------------+                                    |+-----------------------------------v--------------------------------------+|                           DOMAIN SERVICES                               || Customer | Subscription | Delivery | Requests | Billing | Payment || Inventory | Notification | Audit | Analytics | AI | Reporting |+-----------------------------------+--------------------------------------+                                    |+-----------------------------------v--------------------------------------+|                        PERSISTENCE / INFRASTRUCTURE                      || PostgreSQL | Redis | Object Storage | Payment Gateway | Messaging | Logs |+-------------------------------------------------------------------------+
+
+2.3 Core Design Principles
+
+PostgreSQL is the authoritative source of truth for persistent business state.
+
+Farmer/owner/admin controls the customer relationship, pricing, subscription and financial rules; customers submit requests through the governed portal.
+
+Every protected request is evaluated for authentication, role, tenant, and resource ownership.
+
+Historical financial and delivery facts are not silently overwritten; corrections use explicit adjustment or correction workflows.
+
+AI recommendations are advisory and cannot directly mutate financial or delivery state.
+
+All high-value mutations are auditable and suitable for forensic review.
+
+External integrations are isolated behind provider adapters and shall not become the system of record.
+
+2.4 Product Functions Summary
+
+Subsystem
+
+Primary Capabilities
+
+Identity & Access
+
+Login, logout, password management, invitation activation, session, RBAC, tenant isolation
+
+Tenant & Business
+
+Tenant profile, dairy business profile, users, staff roles, preferences
+
+Customer Management
+
+Customer creation, invitation, activation, profile, ownership/transfer, merge
+
+Catalog & Pricing
+
+Products, unit pricing, price history, effective dates
+
+Subscriptions
+
+Subscription creation, versions, schedules, pauses, quantity changes
+
+Delivery & Ledger
+
+Expected deliveries, actual delivery capture, partial/skip/extra/not-delivered/disputed states
+
+Requests & Disputes
+
+Pause, extra milk, quantity change, delivery correction, dispute review
+
+Billing
+
+Cycle generation, invoice calculation, adjustments, month closing, overdue status
+
+Payments
+
+Checkout, UPI, cash/manual payments, gateway webhooks, reconciliation, receipts
+
+Inventory & Day Close
+
+Production inputs, stock, waste, delivered totals, reconciliation, daily finalization
+
+Logistics
+
+Routes, route stops, shifts, delivery-agent views, QR proof
+
+Notifications
+
+In-app, SMS, WhatsApp and email queues with retry and preferences
+
+Audit & Compliance
+
+Append-only audit events, hash chain verification, access history, security logs
+
+Analytics
+
+Consumption, revenue, collection, exceptions, customer health, operational reports
+
+AI / BI
+
+Demand forecast, churn risk and evidence-backed recommendations
+
+Platform Governance
+
+SuperAdmin tenant health, system status and cross-tenant governance
+
+Operations
+
+Monitoring, backups, DR, CI/CD, health/readiness, incident response
+
+2.5 User Classes and Characteristics
+
+Role
+
+Description
+
+Typical Permissions
+
+OWNER
+
+Dairy owner / business owner
+
+Full tenant operational control, users, pricing, billing, delivery, inventory, audit review
+
+MANAGER
+
+Operational manager
+
+Customer, route, delivery, request, dispute and operational management within assigned tenant
+
+DELIVERY_AGENT
+
+Milk delivery staff
+
+Assigned route, customer stop details, delivery capture, QR verification, proof submission
+
+ACCOUNTANT
+
+Financial operator
+
+Invoices, payments, reconciliation, reports, adjustments subject to approval
+
+SUPPORT
+
+Customer support staff
+
+Customer service, requests, disputes and profile assistance with restricted financial controls
+
+CUSTOMER
+
+Milk subscriber
+
+Profile, subscription view, requests, disputes, statements, payments, receipts
+
+SUPERADMIN
+
+Platform governance operator
+
+Platform-level tenant/system health and governance; no routine customer-level business actions
+
+2.6 Operating Environment
+
+Area
+
+Requirement
+
+Client
+
+Modern Chromium/Firefox/Safari/Edge browser; responsive web UI for desktop and mobile
+
+Server
+
+Node.js-compatible managed runtime; Next.js App Router
+
+Database
+
+PostgreSQL managed service with SSL/TLS and connection pooling
+
+Cache / Queue
+
+Redis-compatible managed service for rate limits, locks, cache, event/notification queues
+
+External services
+
+Payment gateway, SMS/WhatsApp/email provider, optional object storage, optional maps provider, monitoring service
+
+Network
+
+HTTPS only in production; secure outbound integrations; webhook endpoint reachable from provider
+
+Timezone
+
+Tenant-configurable; default India Standard Time (Asia/Kolkata)
+
+Currency
+
+Tenant-configurable; default INR for the India deployment
+
+2.7 Constraints
+
+The system shall not depend on an in-memory singleton for authoritative business data in production.
+
+Production deployment shall not use demo persona authentication or public customer self-registration.
+
+Financial state transitions shall occur within transactional boundaries.
+
+External payment webhook verification secrets shall be supplied by environment/secret management and shall fail closed when missing.
+
+The browser shall not be trusted to provide tenant, farmer, role, or financial ownership values.
+
+The application shall remain usable on mobile devices for delivery operations.
+
+The platform must support incremental replacement of integrations without changing the core domain model.
+
+3. Functional Requirements
+
+3.1 Authentication & Identity
+
+FR-AUTH-001 [Must]: The system shall authenticate a user using a real registered credential (phone or email plus password, according to tenant configuration) stored as a secure password hash in PostgreSQL.  Source: Requirements baseline.
+
+FR-AUTH-002 [Must]: The system shall reject authentication attempts with invalid credentials using a generic failure response that does not unnecessarily reveal account existence.  Source: Requirements baseline.
+
+FR-AUTH-003 [Must]: The production login endpoint shall not accept a demo user identifier, persona selector, or preset account as an authentication factor.  Source: Requirements baseline.
+
+FR-AUTH-004 [Must]: The system shall create a cryptographically protected session after successful authentication.  Source: Requirements baseline.
+
+FR-AUTH-005 [Must]: The session shall bind the authenticated user to a tenant and role, and shall contain or permit secure resolution of the user’s business identity (farmer/staff/customer).  Source: Requirements baseline.
+
+FR-AUTH-006 [Must]: The system shall reject expired, malformed, unsigned, or tampered session tokens.  Source: Requirements baseline.
+
+FR-AUTH-007 [Must]: Session cookies shall be HttpOnly, Secure in production, and use an appropriate SameSite policy.  Source: Requirements baseline.
+
+FR-AUTH-008 [Must]: The system shall support logout and invalidate/expire the active session.  Source: Requirements baseline.
+
+FR-AUTH-009 [Must]: The system shall allow an authenticated user to change their password after verifying the existing credential.  Source: Requirements baseline.
+
+FR-AUTH-010 [Must]: The system shall support a secure password-reset flow using a short-lived, single-use proof (OTP or reset link) without storing raw reset secrets.  Source: Requirements baseline.
+
+FR-AUTH-011 [Must]: The system shall rate-limit login and password-reset endpoints and record repeated suspicious authentication activity.  Source: Requirements baseline.
+
+FR-AUTH-012 [Must]: The system shall not select a user, farmer or tenant by “first matching record” as a fallback for missing session identity.  Source: Requirements baseline.
+
+FR-AUTH-013 [Must]: The system shall invalidate or rotate sessions after security-sensitive credential changes according to the security policy.  Source: Requirements baseline.
+
+3.2 Customer Invitation & Activation
+
+FR-CUST-001 [Must]: Only authorized tenant users (OWNER/MANAGER or other explicitly permitted administrative role) shall create customer accounts.  Source: Requirements baseline.
+
+FR-CUST-002 [Must]: The system shall create a new customer in INVITED state before activation.  Source: Requirements baseline.
+
+FR-CUST-003 [Must]: Public self-registration shall remain disabled for production customers.  Source: Requirements baseline.
+
+FR-CUST-004 [Must]: The system shall generate a high-entropy invitation token and store only a protected representation of the token.  Source: Requirements baseline.
+
+FR-CUST-005 [Must]: Invitation tokens shall be single-use and time-limited.  Source: Requirements baseline.
+
+FR-CUST-006 [Must]: Activation shall require the customer to establish credentials and shall transition the customer from INVITED to ACTIVE only after all required checks pass.  Source: Requirements baseline.
+
+FR-CUST-007 [Must]: The invitation flow shall not permit the invitee to select or change the owning tenant/farmer relationship.  Source: Requirements baseline.
+
+FR-CUST-008 [Must]: The system shall expose invitation delivery channel and invitation status to authorized tenant staff.  Source: Requirements baseline.
+
+FR-CUST-009 [Must]: The system shall support re-invitation/rotation without invalidating the entire customer record.  Source: Requirements baseline.
+
+3.3 Customer Profile & Ownership
+
+FR-CUST-010 [Must]: Customers shall be able to update allowed personal fields such as name, phone, email, address, and notification preferences.  Source: Requirements baseline.
+
+FR-CUST-011 [Must]: Customers shall not be able to modify tenantId, farmerId, account status, pricing, milk type, billing rules, or contractual subscription quantities directly.  Source: Requirements baseline.
+
+FR-CUST-012 [Must]: Authorized staff shall be able to view and manage customer profiles within their tenant and ownership scope.  Source: Requirements baseline.
+
+FR-CUST-013 [Must]: Customer ownership transfers shall be handled through an explicit transfer workflow with approval and effective date.  Source: Requirements baseline.
+
+FR-CUST-014 [Must]: Historical deliveries, invoices and payments shall retain the historical tenant/farmer association after a customer transfer.  Source: Requirements baseline.
+
+FR-CUST-015 [Must]: Duplicate customers may be merged only through an authorized merge workflow that records which record became primary and preserves an audit trail.  Source: Requirements baseline.
+
+3.4 Tenant & Staff Administration
+
+FR-TEN-001 [Must]: The system shall maintain a tenant record with active/inactive status and business contact information.  Source: Requirements baseline.
+
+FR-TEN-002 [Must]: OWNER shall be able to maintain business profile information such as dairy name, address, contact details and supported payment identifiers.  Source: Requirements baseline.
+
+FR-TEN-003 [Must]: OWNER shall be able to create, activate, suspend and deactivate tenant staff subject to role permissions.  Source: Requirements baseline.
+
+FR-TEN-004 [Must]: Every staff user shall belong to exactly one tenant unless they are SUPERADMIN and the platform model explicitly permits global scope.  Source: Requirements baseline.
+
+FR-TEN-005 [Must]: User management actions shall be audited.  Source: Requirements baseline.
+
+3.5 Roles and Authorization
+
+Role
+
+Customer Mgmt
+
+Delivery
+
+Billing/Payments
+
+Inventory
+
+Reports
+
+Platform Governance
+
+OWNER
+
+Full
+
+Full
+
+Full / approve
+
+Full
+
+Full
+
+Tenant only
+
+MANAGER
+
+Full
+
+Operational
+
+Operational / approval-based
+
+Operational
+
+Full tenant
+
+No
+
+DELIVERY_AGENT
+
+Assigned only
+
+Assigned routes
+
+No financial approval
+
+Read/operational as assigned
+
+Assigned operations
+
+No
+
+ACCOUNTANT
+
+Read / support
+
+No
+
+Invoices/payments/reconciliation
+
+Read
+
+Financial
+
+No
+
+SUPPORT
+
+Support only
+
+No
+
+No direct posting
+
+Read
+
+Customer support
+
+No
+
+CUSTOMER
+
+Own profile
+
+Own delivery view
+
+Own payments
+
+No
+
+Own statements
+
+No
+
+SUPERADMIN
+
+Global governance
+
+No routine tenant operations
+
+Global monitoring only
+
+Global monitoring
+
+Global telemetry
+
+Platform
+
+Authorization invariant:  The server shall derive permission from authenticated identity, role, tenant and resource ownership. Client-supplied tenantId, farmerId, role or ownership values shall never override server-side authorization.
+
+3.6 Product Catalog & Pricing
+
+FR-PROD-001 [Must]: Authorized staff shall create, update, activate and deactivate milk/products sold by the dairy.  Source: Requirements baseline.
+
+FR-PROD-002 [Must]: Products shall define a unit of measure and a current price where applicable.  Source: Requirements baseline.
+
+FR-PROD-003 [Must]: Price changes shall be recorded as effective-dated price history.  Source: Requirements baseline.
+
+FR-PROD-004 [Must]: The system shall prevent overlapping active price windows for the same product and tenant.  Source: Requirements baseline.
+
+FR-PROD-005 [Must]: Historical delivery and invoice records shall preserve the price applicable to the business event; later product price changes shall not retrospectively change historical records.  Source: Requirements baseline.
+
+FR-PROD-006 [Must]: Pricing APIs shall validate non-negative quantities and prices and shall reject invalid precision/range inputs.  Source: Requirements baseline.
+
+3.7 Subscription Management
+
+FR-SUB-001 [Must]: Authorized staff shall create a subscription for a customer with product, quantity, frequency and effective start date.  Source: Requirements baseline.
+
+FR-SUB-002 [Must]: The system shall support a subscription lifecycle including DRAFT, ACTIVE, PAUSED, SCHEDULED_CHANGE, CANCELLED and EXPIRED where applicable.  Source: Requirements baseline.
+
+FR-SUB-003 [Must]: Subscription changes shall be represented by effective-dated versions rather than rewriting historical subscription facts.  Source: Requirements baseline.
+
+FR-SUB-004 [Must]: Subscription versions shall not have overlapping effective periods for the same subscription.  Source: Requirements baseline.
+
+FR-SUB-005 [Must]: Customer quantity/pause requests shall enter an approval workflow before changing operational state when business policy requires approval.  Source: Requirements baseline.
+
+FR-SUB-006 [Must]: Subscription schedule rules shall determine expected delivery dates/quantities.  Source: Requirements baseline.
+
+FR-SUB-007 [Must]: A subscription shall be scoped to the same tenant and customer relationship validated by the server.  Source: Requirements baseline.
+
+3.8 Delivery & Daily Ledger
+
+FR-DEL-001 [Must]: The system shall generate expected delivery records from active subscription versions and applicable schedule/shift rules.  Source: Requirements baseline.
+
+FR-DEL-002 [Must]: The ledger shall distinguish scheduled quantity from delivered quantity.  Source: Requirements baseline.
+
+FR-DEL-003 [Must]: The delivery lifecycle shall support EXPECTED, DELIVERED, PARTIAL, SKIPPED, EXTRA, NOT_DELIVERED and DISPUTED states.  Source: Requirements baseline.
+
+FR-DEL-004 [Must]: The system shall lock the price per unit on the delivery record using the price effective for that delivery date or other approved business date rule.  Source: Requirements baseline.
+
+FR-DEL-005 [Must]: Delivery updates shall calculate billable quantity/amount on the server using the locked business rules.  Source: Requirements baseline.
+
+FR-DEL-006 [Must]: A repeated delivery submission with the same idempotency operationId shall not apply the business effect twice.  Source: Requirements baseline.
+
+FR-DEL-007 [Must]: Concurrent delivery updates shall not result in lost updates or duplicate state transitions.  Source: Requirements baseline.
+
+FR-DEL-008 [Must]: A finalized day shall block ordinary delivery edits.  Source: Requirements baseline.
+
+FR-DEL-009 [Must]: Corrections after day finalization shall use an explicit correction/adjustment workflow approved by an authorized role.  Source: Requirements baseline.
+
+FR-DEL-010 [Must]: Delivery records shall retain actor, timestamp and relevant proof metadata where configured.  Source: Requirements baseline.
+
+3.9 Requests: Pause, Extra Milk, Quantity Change
+
+FR-REQ-001 [Must]: Customers shall be able to submit a vacation/pause request with start date, end date and reason.  Source: Requirements baseline.
+
+FR-REQ-002 [Must]: Customers shall be able to request additional milk for a defined date/quantity subject to tenant rules.  Source: Requirements baseline.
+
+FR-REQ-003 [Must]: Customers shall be able to request future subscription quantity changes.  Source: Requirements baseline.
+
+FR-REQ-004 [Must]: Requests shall be stored as PENDING until reviewed where approval is required.  Source: Requirements baseline.
+
+FR-REQ-005 [Must]: Authorized staff shall approve or reject requests with decision notes where applicable.  Source: Requirements baseline.
+
+FR-REQ-006 [Must]: Approval shall create the corresponding operational effect through a transaction and audit event.  Source: Requirements baseline.
+
+FR-REQ-007 [Must]: Rejection shall not silently modify the operational ledger.  Source: Requirements baseline.
+
+3.10 Dispute Management
+
+FR-DSP-001 [Must]: Customers shall be able to raise disputes for non-delivery, wrong quantity, quality issues or billing discrepancies according to tenant configuration.  Source: Requirements baseline.
+
+FR-DSP-002 [Must]: The system shall preserve the original delivery/financial record while recording the dispute.  Source: Requirements baseline.
+
+FR-DSP-003 [Must]: Authorized staff shall review, resolve or reject disputes with a reason.  Source: Requirements baseline.
+
+FR-DSP-004 [Must]: A resolved dispute that affects money or billable quantity shall create an explicit adjustment/credit/debit transaction rather than silently overwriting the source record.  Source: Requirements baseline.
+
+FR-DSP-005 [Must]: Dispute status transitions shall be auditable.  Source: Requirements baseline.
+
+3.11 Route & Shift Management
+
+FR-ROUTE-001 [Must]: Authorized staff shall create routes and assign customers/stops to routes.  Source: Requirements baseline.
+
+FR-ROUTE-002 [Must]: Each route stop shall have a sequence and shift where required.  Source: Requirements baseline.
+
+FR-ROUTE-003 [Must]: Delivery agents shall only view stops assigned to their authorized route/area.  Source: Requirements baseline.
+
+FR-ROUTE-004 [Must]: Route changes shall not rewrite historical delivery attribution.  Source: Requirements baseline.
+
+3.12 QR Delivery Verification
+
+FR-QR-001 [Must]: The system shall assign an opaque, non-PII QR identity to a customer/stop where QR verification is enabled.  Source: Requirements baseline.
+
+FR-QR-002 [Must]: Scanning a QR token shall resolve to the authorized delivery context without exposing unrelated customer information.  Source: Requirements baseline.
+
+FR-QR-003 [Must]: QR tokens shall support revocation/rotation when compromise is suspected.  Source: Requirements baseline.
+
+FR-QR-004 [Must]: The system shall optionally record scan time, device identifier, coarse location and proof media subject to privacy configuration and consent/legal basis.  Source: Requirements baseline.
+
+FR-QR-005 [Must]: QR-derived delivery actions shall still pass normal tenant and role authorization.  Source: Requirements baseline.
+
+3.13 Billing & Invoicing
+
+FR-BILL-001 [Must]: The system shall generate billing data from authoritative delivery/ledger data and applicable adjustments.  Source: Requirements baseline.
+
+FR-BILL-002 [Must]: A customer shall have at most one invoice for a tenant-specific billing period identified by customer, month and year unless the business model explicitly supports partitioned invoices.  Source: Requirements baseline.
+
+FR-BILL-003 [Must]: Invoice line items shall retain date, description, quantity, rate and amount.  Source: Requirements baseline.
+
+FR-BILL-004 [Must]: Invoices shall follow a lifecycle including DRAFT, ISSUED, PARTIALLY_PAID, PAID and OVERDUE as applicable.  Source: Requirements baseline.
+
+FR-BILL-005 [Must]: Issued invoices shall be treated as financially meaningful records and shall not be silently rewritten.  Source: Requirements baseline.
+
+FR-BILL-006 [Must]: Invoice corrections shall use adjustment records such as credit or debit notes with authorized actor and reason.  Source: Requirements baseline.
+
+FR-BILL-007 [Must]: Month closing shall lock the relevant billing period from unauthorized direct edits.  Source: Requirements baseline.
+
+FR-BILL-008 [Must]: Outstanding amount shall be computed from invoice total and valid recorded payments/adjustments using server-side arithmetic.  Source: Requirements baseline.
+
+3.14 Payments & Gateway Integration
+
+FR-PAY-001 [Must]: The system shall allow supported payment methods such as UPI, cash, card or net banking according to tenant configuration.  Source: Requirements baseline.
+
+FR-PAY-002 [Must]: A payment shall be associated with exactly one invoice and authorized tenant/customer context.  Source: Requirements baseline.
+
+FR-PAY-003 [Must]: Gateway callbacks shall be verified using the provider’s cryptographic signature mechanism over the raw request body where required.  Source: Requirements baseline.
+
+FR-PAY-004 [Must]: The system shall reject unsigned, malformed or tampered payment webhooks.  Source: Requirements baseline.
+
+FR-PAY-005 [Must]: Payment processing shall be idempotent using a unique provider transaction/reference identifier or equivalent operation key.  Source: Requirements baseline.
+
+FR-PAY-006 [Must]: The system shall validate the payment amount against the expected business state before applying financial credit, subject to approved partial-payment rules.  Source: Requirements baseline.
+
+FR-PAY-007 [Must]: Replay of the same valid webhook shall not double-credit an invoice.  Source: Requirements baseline.
+
+FR-PAY-008 [Must]: Payment success shall update payment status, invoice balances, receipt data and audit trail transactionally.  Source: Requirements baseline.
+
+FR-PAY-009 [Must]: Secrets such as webhook signing keys shall never be committed to source control or hardcoded as production fallbacks.  Source: Requirements baseline.
+
+3.15 Inventory & Day Closing
+
+FR-INV-001 [Must]: Authorized staff shall record daily production/stock inputs required for milk reconciliation.  Source: Requirements baseline.
+
+FR-INV-002 [Must]: The system shall compute a reconciliation discrepancy from configured production, delivered volume, stock, waste and other approved categories.  Source: Requirements baseline.
+
+FR-INV-003 [Must]: The system shall support an explicit day state such as OPEN, REVIEW and FINALIZED.  Source: Requirements baseline.
+
+FR-INV-004 [Must]: Finalization shall occur transactionally and shall prevent unauthorized modification of covered delivery facts.  Source: Requirements baseline.
+
+FR-INV-005 [Must]: A finalization action shall record actor, time, status, discrepancy and audit evidence.  Source: Requirements baseline.
+
+3.16 Customer Statements, Receipts & Reports
+
+FR-RPT-001 [Must]: Customers shall be able to view their own delivery ledger, invoices, payments and receipts.  Source: Requirements baseline.
+
+FR-RPT-002 [Must]: Authorized staff shall be able to filter and export customer, delivery, invoice, payment and audit reports.  Source: Requirements baseline.
+
+FR-RPT-003 [Must]: Exports shall respect tenant and role scope and shall not include unauthorized rows.  Source: Requirements baseline.
+
+FR-RPT-004 [Must]: Exported financial reports shall include the reporting period, tenant/business identity, generation timestamp and relevant filters.  Source: Requirements baseline.
+
+FR-RPT-005 [Must]: Large exports shall use server-side pagination or streaming/batch generation rather than requiring the browser to load the full dataset into memory.  Source: Requirements baseline.
+
+3.17 Notifications
+
+FR-NOT-001 [Must]: The system shall support in-app notifications and provider-backed channels such as SMS, WhatsApp and email where configured.  Source: Requirements baseline.
+
+FR-NOT-002 [Must]: Notification delivery shall be decoupled from core database transactions using an outbox/queue pattern or equivalent durable mechanism.  Source: Requirements baseline.
+
+FR-NOT-003 [Must]: Failed notifications shall be retried with bounded exponential backoff and recorded failure information.  Source: Requirements baseline.
+
+FR-NOT-004 [Must]: Customers shall be able to configure allowed notification preferences within business constraints.  Source: Requirements baseline.
+
+FR-NOT-005 [Must]: The system shall avoid sending duplicate notifications for the same business event and channel when an idempotency key exists.  Source: Requirements baseline.
+
+3.18 Audit & Cryptographic Integrity
+
+FR-AUD-001 [Must]: The system shall record high-value mutations such as customer ownership changes, subscription changes, deliveries, invoice generation/adjustments, payments, disputes and day/month closing.  Source: Requirements baseline.
+
+FR-AUD-002 [Must]: Each audit event shall identify actor, time, tenant, entity and action, and shall record relevant before/after state or a safe digest where appropriate.  Source: Requirements baseline.
+
+FR-AUD-003 [Must]: Audit records shall be append-only from the application perspective.  Source: Requirements baseline.
+
+FR-AUD-004 [Must]: The system shall support integrity verification of its hash-linked audit chain where cryptographic chaining is enabled.  Source: Requirements baseline.
+
+FR-AUD-005 [Must]: Tampering or chain discontinuity shall be detectable and reported to an authorized governance interface.  Source: Requirements baseline.
+
+FR-AUD-006 [Must]: Security blocks and suspicious request events shall be logged without leaking sensitive payload data.  Source: Requirements baseline.
+
+3.19 SuperAdmin Governance
+
+FR-SA-001 [Must]: SUPERADMIN shall be able to authenticate through a separately protected privilege boundary.  Source: Requirements baseline.
+
+FR-SA-002 [Must]: SUPERADMIN shall view tenant health and platform telemetry without automatically acquiring operational ownership inside a tenant.  Source: Requirements baseline.
+
+FR-SA-003 [Must]: Global views shall clearly indicate tenant boundaries and shall not expose customer financial details unless separately authorized by policy.  Source: Requirements baseline.
+
+FR-SA-004 [Must]: SuperAdmin governance actions shall be auditable and should require strong authentication or step-up controls for sensitive operations.  Source: Requirements baseline.
+
+4. Business Rules and Domain Invariants
+
+4.1 Customer Relationship Rules
+
+A customer is created by the dairy business, not by public sign-up.
+
+Customer activation establishes credentials; it does not establish ownership.
+
+Customer personal-profile edits are limited to allowed personal/contact fields.
+
+A customer cannot self-select a farmer, tenant, product price or billing rule.
+
+Ownership transfer is a governed domain event; history remains attached to the original business context.
+
+4.2 Subscription & Delivery Rules
+
+Expected delivery is derived from the effective subscription version and schedule.
+
+Actual delivery is a separate operational fact.
+
+Price on a delivery record is locked for that business date; current catalog price cannot rewrite the past.
+
+SKIPPED and NOT_DELIVERED normally produce zero billable quantity; other states follow explicit quantity rules.
+
+Disputed deliveries remain traceable to the original record and are adjusted through dispute/credit/debit workflows.
+
+4.3 Closing Rules
+
+Finalized days are immutable for ordinary delivery edits.
+
+Closed months are immutable for ordinary invoice rewrites.
+
+Corrections require explicit adjustment objects and authorized approval.
+
+Closing operations shall be transactionally serialized for a tenant/farmer/date or tenant/month key.
+
+4.4 Financial Rules
+
+Exactly one logical invoice per customer and billing month/year is the baseline rule.
+
+Payment transaction reference is unique and is the idempotency anchor for gateway replay protection.
+
+Outstanding amount shall never become negative unless credit-balance behavior is explicitly modeled.
+
+Financial amounts and quantities are server-computed from authoritative records.
+
+4.5 AI Authority Rule
+
+AI may recommend forecasts, customer-health signals, or operational actions but shall never autonomously create or modify deliveries, invoices, payments, customer ownership, pricing, or other financial/domain state. Any AI suggestion that changes business state must pass a human approval step through the same authorized domain service used by normal application actions.
+
+5. Data Requirements
+
+5.1 Core Entity Model
+
+Entity
+
+Key Data
+
+Purpose / Integrity Rules
+
+Tenant
+
+id, name, slug, contact, active state
+
+Top-level tenant boundary; unique slug; all core business data scoped to tenant.
+
+User
+
+id, tenantId, email, phone, name, passwordHash, role, active
+
+Authentication identity; unique contact identifiers; role-bound access.
+
+FarmerProfile
+
+id, userId, tenantId, businessName, UPI, address, routeCode
+
+Dairy operator identity and business profile.
+
+CustomerProfile
+
+id, userId, tenantId, farmerId, address, milkType, dailyQuantity, status, transferStatus
+
+Customer business relationship; tenant/farmer ownership is protected.
+
+Product
+
+id, tenantId, name, code, unit, price
+
+Catalog product; tenant scoped; current operational state.
+
+ProductPriceHistory
+
+productId, rate, effectiveFrom/to, createdBy
+
+Historical/effective-dated pricing.
+
+Subscription
+
+id, tenantId, customerId, productId, farmerId, quantity, frequency, status, dates
+
+Commercial subscription master record.
+
+SubscriptionVersion
+
+subscriptionId, version, quantity, product, frequency, shift, effectiveFrom/to, actor
+
+Immutable/effective-dated subscription changes.
+
+DeliveryRecord
+
+id, tenantId, customerId, farmerId, productId, date, scheduledQty, deliveredQty, lockedPrice, status
+
+Authoritative daily delivery/ledger fact.
+
+PauseRequest
+
+customer, dates, reason, status, reviewer
+
+Governed vacation/pause workflow.
+
+ExtraMilkRequest
+
+customer, date, quantity, product, status, reviewer
+
+Governed extra allocation workflow.
+
+QuantityChangeRequest
+
+customer, effectiveDate, newQuantity, status, reviewer
+
+Governed future quantity change.
+
+Dispute
+
+customer, delivery reference, issue type, notes, status, resolution
+
+Exception workflow preserving source history.
+
+Route / RouteStop
+
+route, farmer, sequence, shift, customer
+
+Delivery logistics and route ordering.
+
+Invoice
+
+customer, farmer, month, year, totals, status, dueDate
+
+Authoritative billing document; one-per-cycle invariant.
+
+InvoiceItem
+
+invoice, date, description, quantity, rate, amount
+
+Itemized billing evidence.
+
+InvoiceAdjustment
+
+invoice, type, amount, reason, authorizedBy
+
+Credit/debit correction without rewriting source history.
+
+Payment
+
+tenant, invoice, customer, amount, method, transactionRef, status, paidAt
+
+Financial settlement; unique transaction reference.
+
+InventoryRecord
+
+tenant, farmer, date, produced/stock/waste inputs
+
+Daily material reconciliation.
+
+DayClosing / MonthClosing
+
+scope key, date/month, state, actor, timestamp
+
+Locks operational or billing periods after finalization.
+
+CustomerInvitation
+
+customer, tokenHash, expiry, channel, status, usedAt
+
+Secure onboarding artifact.
+
+CustomerTransferRequest
+
+customer, from/to farmer, state, effectiveDate
+
+Controlled ownership transfer.
+
+DeliveryCorrectionRequest
+
+delivery, reason, requested change, approval
+
+Post-close correction workflow.
+
+Notification / Queue
+
+recipient, channel, payload reference, state, retry count
+
+Durable outbound messaging.
+
+CustomerNotificationPreference
+
+customer, channel preferences
+
+Customer communication controls.
+
+CustomerMergeLog
+
+primary, merged, actor, timestamp
+
+Duplicate merge evidence.
+
+OperationLog / Idempotency
+
+operationKey, actor, endpoint/domain action, response reference
+
+Replay protection for mutations.
+
+AuditBlock
+
+index, tenant, actor, action, entity, before/after, previousHash, currentHash
+
+Tamper-evident event chain.
+
+5.2 Mandatory Data Integrity
+
+DR-001 [Must]: All core business tables shall contain a tenant reference directly or through an unambiguous parent relationship.  Source: Requirements baseline.
+
+DR-002 [Must]: Foreign key relationships shall use database-enforced integrity wherever appropriate.  Source: Requirements baseline.
+
+DR-003 [Must]: The migration schema and ORM schema shall be maintained as one controlled contract; schema drift shall fail CI or deployment checks.  Source: Requirements baseline.
+
+DR-004 [Must]: Unique constraints shall enforce invoice-per-cycle and payment-transaction idempotency.  Source: Requirements baseline.
+
+DR-005 [Must]: Delivery uniqueness shall prevent duplicate logical records for the same customer/date/product unless the domain explicitly supports multiple delivery events.  Source: Requirements baseline.
+
+DR-006 [Must]: Quantities and monetary values shall use non-negative constraints where the domain requires them.  Source: Requirements baseline.
+
+DR-007 [Must]: Effective-dated price/subscription periods shall not overlap.  Source: Requirements baseline.
+
+DR-008 [Must]: Audit records shall not depend on mutable UI state for actor identity.  Source: Requirements baseline.
+
+DR-009 [Must]: Soft deletion/deactivation shall be preferred over hard deletion for financially or operationally significant entities unless legal/data-retention policy permits deletion.  Source: Requirements baseline.
+
+6. External Interface Requirements
+
+6.1 Web UI
+
+Responsive layout for desktop, tablet and delivery-agent mobile use.
+
+Role-specific navigation; users shall never see controls they cannot execute, while server authorization remains the final security boundary.
+
+Forms shall provide field validation, error states, loading states and confirmation for irreversible actions.
+
+Financial values shall display currency and period clearly and consistently.
+
+Dates and timezone-sensitive operations shall use the tenant timezone and display the effective timezone when ambiguity exists.
+
+6.2 API Interface
+
+The baseline API style is HTTPS + JSON under /api/*, with standard success/error envelopes. Protected APIs shall authenticate and authorize on the server. Mutation endpoints should accept an idempotency key or operationId where replay is plausible. Errors should use stable machine-readable codes in addition to human-readable messages.
+
+Area
+
+Representative Endpoint
+
+Requirements
+
+Authentication
+
+POST /api/auth/login
+
+Credential validation, rate limiting, secure session issuance
+
+Logout
+
+POST /api/auth/logout
+
+Session invalidation
+
+Customer activation
+
+POST /api/auth/activate-customer
+
+One-time invitation validation + password setup
+
+Customer profile
+
+GET/PUT /api/customer/profile
+
+Own customer fields only; ownership/security invariants
+
+Customer management
+
+GET/POST/PATCH /api/customers
+
+Tenant-scoped staff operations
+
+Ledger
+
+GET/PATCH /api/ledger
+
+Expected/actual delivery and correction-aware updates
+
+Requests
+
+POST /api/customer/pause-request etc.
+
+Customer submits governed request
+
+Approvals
+
+PATCH /api/farmer/requests/[id]
+
+Authorized staff reviews request
+
+Invoices
+
+GET/POST /api/invoices
+
+Billing generation/retrieval with tenant scope
+
+Payments
+
+GET/POST /api/payments
+
+Payment records and reconciliation
+
+Webhook
+
+POST /api/webhook/payment
+
+Signature verification + idempotency + transaction
+
+Inventory
+
+GET/POST /api/inventory
+
+Reconciliation and day close
+
+Audit
+
+GET /api/audit; GET /api/audit/verify
+
+Audit retrieval and integrity verification
+
+SuperAdmin
+
+GET /api/superadmin
+
+Platform governance telemetry
+
+6.3 Payment Gateway Interface
+
+Use provider SDK/API only behind an adapter interface.
+
+Verify webhook signatures against the raw body and secret from secure configuration.
+
+Treat gateway event IDs/transaction references as idempotency keys.
+
+Reconcile amount, invoice, currency, customer and current invoice state before posting financial credit.
+
+Store provider response metadata needed for reconciliation without storing prohibited sensitive payment credentials.
+
+6.4 Notification Provider Interface
+
+Providers shall be abstracted so a provider can be replaced without domain-layer rewrites.
+
+Queue records shall carry retryable vs terminal failure state.
+
+Provider credentials are deployment secrets.
+
+The system shall record provider message IDs where useful for reconciliation.
+
+6.5 Maps / Location Interface
+
+A maps provider may be used for route visualization and directions. API keys shall be restricted and server/browser exposure shall follow provider requirements. Location data is optional and privacy-controlled.
+
+7. Security Requirements
+
+7.1 Security Objectives
+
+Prevent unauthorized access and privilege escalation.
+
+Prevent cross-tenant information disclosure or mutation.
+
+Prevent financial replay/double posting.
+
+Preserve auditability and detect tampering.
+
+Minimize exposure of credentials, PII and payment metadata.
+
+Provide defense in depth against brute force, injection and malicious payloads.
+
+SEC-001 [Must]: Passwords shall never be stored in plaintext.  Source: Requirements baseline.
+
+SEC-002 [Must]: Password hashing shall use a modern memory-hard KDF such as scrypt/Argon2id with unique cryptographic salt and appropriate work factor.  Source: Requirements baseline.
+
+SEC-003 [Must]: Password verification shall use constant-time comparison for derived secrets where applicable.  Source: Requirements baseline.
+
+SEC-004 [Must]: Session tokens shall be cryptographically protected (e.g., HMAC-signed or securely opaque server-side sessions).  Source: Requirements baseline.
+
+SEC-005 [Must]: Authorization shall enforce role, tenant and resource ownership on every protected API.  Source: Requirements baseline.
+
+SEC-006 [Must]: The system shall reject attempts to access or mutate records from another tenant.  Source: Requirements baseline.
+
+SEC-007 [Must]: The system shall reject customer attempts to mutate protected ownership/business fields.  Source: Requirements baseline.
+
+SEC-008 [Must]: All SQL access shall use parameterized queries/ORM parameters; dynamically concatenated SQL from user input is prohibited.  Source: Requirements baseline.
+
+SEC-009 [Must]: The application shall apply input validation and contextual output encoding to mitigate injection and XSS risks.  Source: Requirements baseline.
+
+SEC-010 [Must]: Security headers shall include appropriate CSP, HSTS, X-Content-Type-Options and frame restrictions in production.  Source: Requirements baseline.
+
+SEC-011 [Must]: Authentication and high-risk API endpoints shall be rate-limited using a distributed mechanism where horizontal scaling exists.  Source: Requirements baseline.
+
+SEC-012 [Must]: Secrets shall be loaded from managed environment/secret stores and shall not be committed to source control.  Source: Requirements baseline.
+
+SEC-013 [Must]: Payment webhooks shall fail closed when required verification secrets are missing or invalid.  Source: Requirements baseline.
+
+SEC-014 [Must]: Operational audit logs shall avoid sensitive password/reset-token/payment-secret content.  Source: Requirements baseline.
+
+SEC-015 [Must]: The application shall implement CSRF protection where cookie-authenticated state-changing requests are vulnerable, using same-site policy plus explicit CSRF strategy as appropriate.  Source: Requirements baseline.
+
+SEC-016 [Must]: The platform shall implement secure error handling that avoids leaking stack traces, SQL statements or sensitive identifiers to clients.  Source: Requirements baseline.
+
+SEC-017 [Must]: Security-relevant events such as repeated authentication failures, privilege changes and blocked malicious requests shall be observable.  Source: Requirements baseline.
+
+7.2 Threat Categories
+
+Threat
+
+Example
+
+Required Control
+
+Spoofing
+
+Forged session / credential theft
+
+Signed/opaque sessions, secure cookies, credential protection
+
+Tampering
+
+Changing tenantId, role, price, invoice
+
+Server-side authorization, schema constraints, audit
+
+Repudiation
+
+Denying a financial mutation
+
+Audit trail with actor/time and integrity checks
+
+Information disclosure
+
+Cross-tenant invoice access
+
+Tenant + ownership checks, least privilege
+
+Denial of service
+
+Login/API bursts
+
+Rate limiting, queues, scaling controls
+
+Elevation of privilege
+
+CUSTOMER calling owner endpoint
+
+Role/permission matrix enforced server-side
+
+Injection
+
+SQL/XSS payload
+
+Validation, parameterization, output encoding, WAF/edge controls
+
+Replay
+
+Duplicate payment webhook
+
+Idempotency key + unique transaction ref + transaction
+
+8. Non-Functional Requirements
+
+8.1 Performance
+
+NFR-PERF-001 [Must]: For ordinary authenticated API requests under normal load, the system should target p95 latency <= 300 ms for read operations excluding third-party calls.  Source: Requirements baseline.
+
+NFR-PERF-002 [Must]: Mutation APIs should target p95 <= 500 ms excluding intentionally asynchronous provider processing.  Source: Requirements baseline.
+
+NFR-PERF-003 [Must]: Batch ledger retrieval shall support date ranges without an N+1 request pattern from the frontend.  Source: Requirements baseline.
+
+NFR-PERF-004 [Must]: The system shall use pagination for potentially unbounded lists such as customers, invoices, audit records, activities and deliveries.  Source: Requirements baseline.
+
+NFR-PERF-005 [Must]: Large exports shall be generated through server-side batching/streaming and shall not require loading the entire dataset into browser memory.  Source: Requirements baseline.
+
+NFR-PERF-006 [Must]: The system shall define capacity targets for concurrent users, daily deliveries and monthly invoices before production scaling.  Source: Requirements baseline.
+
+8.2 Scalability
+
+NFR-SCALE-001 [Must]: Application instances shall be stateless with respect to authoritative business state so they can scale horizontally.  Source: Requirements baseline.
+
+NFR-SCALE-002 [Must]: Distributed rate limits and locks shall use Redis or an equivalent shared coordination service when more than one app instance may run.  Source: Requirements baseline.
+
+NFR-SCALE-003 [Must]: Database queries shall use appropriate indexes for tenant, customer, date, invoice period, payment reference and audit lookups.  Source: Requirements baseline.
+
+NFR-SCALE-004 [Must]: Background notification and report jobs shall be independently scalable.  Source: Requirements baseline.
+
+8.3 Availability & Reliability
+
+NFR-AVL-001 [Must]: The production system shall be deployed with health and readiness checks.  Source: Requirements baseline.
+
+NFR-AVL-002 [Must]: Critical writes shall be transactionally atomic: either all required state changes commit or none do.  Source: Requirements baseline.
+
+NFR-AVL-003 [Must]: Transient external dependency failures shall not corrupt core business records.  Source: Requirements baseline.
+
+NFR-AVL-004 [Must]: Retry logic shall use bounded exponential backoff with jitter for retryable operations.  Source: Requirements baseline.
+
+NFR-AVL-005 [Must]: The production service shall have documented backup, recovery and restore verification procedures.  Source: Requirements baseline.
+
+8.4 Usability & Accessibility
+
+NFR-UX-001 [Must]: The UI shall provide responsive workflows for mobile delivery operations and desktop administration.  Source: Requirements baseline.
+
+NFR-UX-002 [Must]: Primary workflows shall minimize manual data entry and make business status obvious.  Source: Requirements baseline.
+
+NFR-UX-003 [Must]: Validation and error messages shall identify what the user can do next without exposing implementation details.  Source: Requirements baseline.
+
+NFR-UX-004 [Must]: Interactive controls shall be keyboard accessible where applicable, with visible focus and logical tab order.  Source: Requirements baseline.
+
+NFR-UX-005 [Must]: Form fields shall have labels and accessible names; color shall not be the sole indicator of status.  Source: Requirements baseline.
+
+8.5 Maintainability
+
+NFR-MNT-001 [Must]: Domain rules shall be isolated from presentation code and provider-specific integration code.  Source: Requirements baseline.
+
+NFR-MNT-002 [Must]: TypeScript shall run in strict mode with controlled validation at API boundaries.  Source: Requirements baseline.
+
+NFR-MNT-003 [Must]: API contracts, migration scripts and database schema shall be version-controlled.  Source: Requirements baseline.
+
+NFR-MNT-004 [Must]: High-risk domain logic shall have automated tests for invariants and edge cases.  Source: Requirements baseline.
+
+NFR-MNT-005 [Must]: Documentation shall be updated with every change that materially affects externally observable behavior.  Source: Requirements baseline.
+
+8.6 Portability
+
+NFR-PORT-001 [Must]: The application shall be portable across supported managed PostgreSQL environments without changing domain semantics.  Source: Requirements baseline.
+
+NFR-PORT-002 [Must]: External providers shall be accessed through adapters/configuration rather than hardcoded provider assumptions.  Source: Requirements baseline.
+
+9. Privacy & Data Governance
+
+9.1 Data Categories
+
+Category
+
+Examples
+
+Handling
+
+Identity
+
+Name, phone, email
+
+Access-controlled, encrypted in transit, minimal exposure
+
+Address / delivery
+
+Delivery address, route details
+
+Visible only to authorized roles/customer
+
+Operational
+
+Subscriptions, deliveries, requests
+
+Tenant-scoped; retained per business policy
+
+Financial
+
+Invoices, payments, transaction refs
+
+Strong access controls, immutable/auditable history
+
+Security
+
+Session metadata, security events
+
+Restricted, retained for security operations
+
+Optional location/proof
+
+GPS, device, photo proof
+
+Feature- and policy-controlled; minimize retention
+
+9.2 Privacy Requirements
+
+PRIV-001 [Must]: The system shall collect only data necessary for stated dairy-operational purposes.  Source: Requirements baseline.
+
+PRIV-002 [Must]: Users shall be informed of required vs optional data and communication preferences.  Source: Requirements baseline.
+
+PRIV-003 [Must]: Access to customer personal data shall be restricted by tenant and role.  Source: Requirements baseline.
+
+PRIV-004 [Must]: Export and deletion/erasure workflows shall follow the applicable legal and contractual retention policy; financial records may require retention exceptions.  Source: Requirements baseline.
+
+PRIV-005 [Must]: Logs shall avoid storing passwords, reset tokens, payment secrets and unnecessary full payloads.  Source: Requirements baseline.
+
+PRIV-006 [Must]: Production backups shall inherit appropriate security and retention controls.  Source: Requirements baseline.
+
+10. Analytics & AI Requirements
+
+10.1 Analytics
+
+AI-ANA-001 [Must]: Operational dashboards shall calculate KPIs from authoritative database data.  Source: Requirements baseline.
+
+AI-ANA-002 [Must]: Reported KPIs shall identify the reporting period and tenant scope.  Source: Requirements baseline.
+
+AI-ANA-003 [Must]: Historical metrics shall not be replaced by hardcoded demonstration values in production.  Source: Requirements baseline.
+
+AI-ANA-004 [Must]: Analytics queries shall be optimized and, where needed, pre-aggregated asynchronously.  Source: Requirements baseline.
+
+10.2 Demand Forecasting
+
+AI-FC-001 [Must]: The system may forecast near-term dairy demand using historical deliveries, subscriptions, pauses, extras and other approved features.  Source: Requirements baseline.
+
+AI-FC-002 [Must]: Forecast outputs shall include forecast window, confidence information and data coverage/training period.  Source: Requirements baseline.
+
+AI-FC-003 [Must]: The system shall not fabricate metrics when insufficient history exists; it shall report insufficient data.  Source: Requirements baseline.
+
+AI-FC-004 [Must]: Forecast evaluation shall include baseline comparisons and error metrics computed from actual validation data.  Source: Requirements baseline.
+
+AI-FC-005 [Must]: Forecast output shall be stored separately from the authoritative delivery/billing state.  Source: Requirements baseline.
+
+10.3 Churn / Customer Health
+
+AI-CHURN-001 [Must]: Customer health or churn signals shall be explainable using observable evidence such as delivery gaps, pauses, disputes, payment behavior and subscription changes.  Source: Requirements baseline.
+
+AI-CHURN-002 [Must]: The system shall avoid presenting speculative attributes or hidden personal inferences as facts.  Source: Requirements baseline.
+
+AI-CHURN-003 [Must]: AI-generated recommendations shall remain advisory and shall not directly change customer status or financial state.  Source: Requirements baseline.
+
+11. Logging, Observability & Monitoring
+
+11.1 Application Logging
+
+OPS-LOG-001 [Must]: The application shall use structured logs with request/correlation ID, timestamp, route, status and latency.  Source: Requirements baseline.
+
+OPS-LOG-002 [Must]: Logs shall distinguish INFO, WARN and ERROR events and include safe diagnostic metadata.  Source: Requirements baseline.
+
+OPS-LOG-003 [Must]: Sensitive fields shall be redacted or excluded.  Source: Requirements baseline.
+
+OPS-LOG-004 [Must]: Security events shall be distinguishable from ordinary business events.  Source: Requirements baseline.
+
+11.2 Metrics
+
+Request rate, error rate, latency percentiles and saturation.
+
+Authentication failures and rate-limit blocks.
+
+Database connection/pool health and slow queries.
+
+Queue depth, retries, dead-letter failures and provider errors.
+
+Payment webhook success/replay/failure counts.
+
+Invoice generation and reconciliation failures.
+
+Audit-chain verification health.
+
+Forecast job success and data sufficiency.
+
+11.3 Health Endpoints
+
+/health or equivalent liveness/health endpoint.
+
+/ready or equivalent readiness endpoint that validates critical dependencies.
+
+A protected operational metrics endpoint or provider integration for application metrics.
+
+12. State Machines
+
+12.1 Customer
+
+INVITED -> ACTIVE -> SUSPENDED -> ACTIVEINVITED -> CLOSEDACTIVE -> CLOSED
+
+12.2 Subscription
+
+DRAFT -> ACTIVE -> PAUSED -> ACTIVEACTIVE -> SCHEDULED_CHANGE -> ACTIVEACTIVE -> CANCELLEDACTIVE -> EXPIRED
+
+12.3 Delivery
+
+EXPECTED -> DELIVEREDEXPECTED -> PARTIALEXPECTED -> SKIPPEDEXPECTED -> NOT_DELIVEREDEXPECTED -> EXTRAEXPECTED -> DISPUTEDDISPUTED -> DELIVERED/PARTIAL/SKIPPED through controlled resolution as defined by the domain workflow.
+
+12.4 Invoice
+
+DRAFT -> ISSUED -> PARTIALLY_PAID -> PAIDISSUED -> OVERDUE -> PAID / ADJUSTEDIssued invoices are corrected through CREDIT/DEBIT adjustments, not destructive edits.
+
+12.5 Request
+
+PENDING -> APPROVEDPENDING -> REJECTEDAPPROVED -> EFFECT_APPLIED (transactional domain effect)
+
+12.6 Day Closing
+
+OPEN -> REVIEW -> FINALIZED
+
+13. Use Cases
+
+ID
+
+Use Case
+
+Actor
+
+Precondition
+
+Main Action
+
+Postcondition
+
+UC-01
+
+Admin creates customer
+
+OWNER/MANAGER
+
+Customer creation form
+
+Create customer, assign tenant/farmer context, generate invitation
+
+Customer = INVITED; invitation stored; audit event created
+
+UC-02
+
+Customer activates account
+
+Customer
+
+Valid invitation
+
+Validate single-use token, set password, activate account
+
+Customer = ACTIVE; session created
+
+UC-03
+
+Customer edits profile
+
+Customer
+
+Authenticated customer
+
+Update name/contact/address/preferences only
+
+Allowed fields updated; restricted fields rejected; audit created
+
+UC-04
+
+Admin creates subscription
+
+OWNER/MANAGER
+
+Customer + product
+
+Create active subscription/version
+
+Effective subscription version exists
+
+UC-05
+
+System generates expected delivery
+
+System
+
+Active subscription
+
+Generate expected delivery for date
+
+One logical expected record per customer/date/product
+
+UC-06
+
+Delivery agent records delivery
+
+DELIVERY_AGENT
+
+Assigned route stop
+
+Capture delivered quantity/status/proof
+
+Delivery record updated atomically; audit created
+
+UC-07
+
+Customer requests pause
+
+Customer
+
+Active subscription
+
+Submit dates + reason
+
+PENDING request visible to staff
+
+UC-08
+
+Manager approves pause
+
+MANAGER/OWNER
+
+Pending pause request
+
+Approve request
+
+Operational schedule/ledger reflects approved pause; audit/notification generated
+
+UC-09
+
+Customer raises dispute
+
+Customer
+
+Historical delivery/invoice
+
+Submit dispute reason
+
+OPEN dispute linked to source record
+
+UC-10
+
+Manager resolves dispute
+
+MANAGER/OWNER
+
+Open dispute
+
+Accept/reject/partial adjustment
+
+Resolution and any financial adjustment recorded
+
+UC-11
+
+System generates monthly invoice
+
+System/ACCOUNTANT
+
+Open billing period
+
+Aggregate authoritative billable items
+
+Invoice DRAFT/ISSUED per policy
+
+UC-12
+
+Customer pays invoice
+
+Customer
+
+Open invoice
+
+Initiate payment
+
+Gateway transaction created; payment remains pending until validated
+
+UC-13
+
+Gateway confirms payment
+
+Gateway
+
+Signed webhook
+
+Verify signature, validate amount, idempotently post payment
+
+Payment SUCCESS; invoice balance updated; receipt/audit
+
+UC-14
+
+Manager closes day
+
+OWNER/MANAGER
+
+Daily operational data
+
+Reconcile and finalize
+
+Day FINALIZED; ordinary delivery edits blocked
+
+UC-15
+
+Admin exports report
+
+Authorized staff
+
+Reporting period
+
+Generate report
+
+Tenant-scoped export created
+
+UC-16
+
+SuperAdmin checks tenant health
+
+SUPERADMIN
+
+Authenticated governance session
+
+Inspect system/tenant telemetry
+
+Read-only governance view with audit where needed
+
+UC-17
+
+AI suggests demand plan
+
+OWNER/MANAGER
+
+Sufficient historical data
+
+Generate forecast and evidence
+
+Advisory forecast returned; no direct state mutation
+
+14. End-to-End Business Flows
+
+14.1 Onboarding Flow
+
+Admin authenticates  -> Create customer  -> Create INVITED profile  -> Generate token  -> Send invitation  -> Customer activates  -> Set password  -> ACTIVE  -> Login  -> Customer Portal
+
+14.2 Daily Delivery Flow
+
+Subscription version + calendar rules  -> Expected delivery  -> Route assignment  -> Delivery agent opens stop  -> Optional QR verification  -> Record actual quantity/status  -> Server calculates billable amount  -> Audit + notification  -> Included in billing period
+
+14.3 Billing & Payment Flow
+
+Deliveries + approved adjustments  -> Invoice draft  -> Issue invoice  -> Customer views invoice  -> Checkout / manual payment  -> Gateway webhook  -> Signature verification  -> Idempotency check  -> DB transaction  -> Payment + invoice balance + receipt + audit
+
+15. Validation, Error Handling & API Error Contracts
+
+15.1 Validation
+
+All API request bodies, query parameters and path parameters shall be validated at the boundary.
+
+Validation schemas shall reject unknown high-risk fields or explicitly ignore them only where the business contract says so.
+
+Date inputs shall use an unambiguous format such as ISO date/ISO timestamp.
+
+Amounts and quantities shall be range-checked and normalized to the domain precision.
+
+15.2 HTTP Status Semantics
+
+Status
+
+Meaning
+
+Typical Use
+
+200
+
+Success
+
+Read/update successful
+
+201
+
+Created
+
+Resource created
+
+400
+
+Bad Request
+
+Invalid payload or domain input
+
+401
+
+Unauthorized
+
+Missing/invalid authentication
+
+403
+
+Forbidden
+
+Authenticated but not permitted
+
+404
+
+Not Found
+
+Resource does not exist or is intentionally hidden
+
+409
+
+Conflict
+
+Duplicate/idempotency/invalid state transition
+
+422
+
+Unprocessable Entity
+
+Well-formed request violates business validation
+
+429
+
+Too Many Requests
+
+Rate limit exceeded
+
+500
+
+Internal Server Error
+
+Unexpected failure; no sensitive details exposed
+
+15.3 Error Envelope
+
+{  "success": false,  "error": {    "code": "RESOURCE_CONFLICT",    "message": "The requested operation conflicts with current state.",    "requestId": "req_..."  }}
+
+16. Verification & Testing Requirements
+
+16.1 Test Levels
+
+Unit tests: domain calculations, state transitions, validation, cryptographic helpers.
+
+Integration tests: PostgreSQL transactions, constraints, service interactions.
+
+API tests: authentication, RBAC, tenant isolation, request/response contracts.
+
+End-to-end tests: real user journeys across portals.
+
+Security tests: IDOR, privilege escalation, replay, invalid signatures, injection, rate limits.
+
+Concurrency tests: simultaneous delivery updates, payment webhook replays, day/month closing race conditions.
+
+Recovery tests: restart behavior, transient provider failure, queue retry, restore from backup.
+
+16.2 Mandatory Acceptance Scenarios
+
+ID
+
+Scenario
+
+Acceptance Criterion
+
+AT-01
+
+Real admin login
+
+Correct credentials lead to the correct tenant-scoped admin portal; demo persona login rejected.
+
+AT-02
+
+Invitation onboarding
+
+Admin creates customer; invite is issued; customer activates once; replay fails.
+
+AT-03
+
+Customer ownership isolation
+
+Customer cannot access another customer’s invoice, delivery or subscription.
+
+AT-04
+
+Cross-tenant isolation
+
+Tenant A user cannot read or mutate Tenant B records even with guessed IDs.
+
+AT-05
+
+Subscription versioning
+
+Mid-month quantity/product change affects only effective future dates.
+
+AT-06
+
+Price locking
+
+Product price change does not rewrite historical delivery/invoice rates.
+
+AT-07
+
+Delivery idempotency
+
+Repeated same operationId produces one business effect.
+
+AT-08
+
+Day close
+
+Finalized day blocks direct edits; approved correction workflow is required.
+
+AT-09
+
+Invoice uniqueness
+
+Duplicate billing attempt for same customer/month is blocked/idempotent.
+
+AT-10
+
+Payment webhook
+
+Valid webhook posts one payment; replay is safe; invalid signature is rejected.
+
+AT-11
+
+Dispute adjustment
+
+Resolved dispute preserves original record and creates explicit adjustment.
+
+AT-12
+
+Inventory reconciliation
+
+Day close records discrepancy and immutable final state.
+
+AT-13
+
+Notification retry
+
+Temporary provider failure queues retry without duplicating business transaction.
+
+AT-14
+
+AI safety
+
+Insufficient data returns an explicit insufficient-data result; no fabricated forecast; no autonomous mutation.
+
+AT-15
+
+Audit integrity
+
+Audit chain verifies; deliberate tampering is detected.
+
+AT-16
+
+Production restart
+
+Restarting application does not erase customers, subscriptions, deliveries, invoices or payments.
+
+17. Deployment & Operational Requirements
+
+17.1 Environment Separation
+
+Development, staging and production shall use separate database credentials and secrets.
+
+Demo/test seed data shall never be applied to the production database.
+
+Production deployment shall require explicit environment configuration validation.
+
+17.2 Required Production Configuration
+
+Configuration
+
+Purpose
+
+Secret?
+
+DATABASE_URL
+
+Authoritative PostgreSQL connection
+
+Yes
+
+SESSION_SECRET
+
+Session signing/protection key
+
+Yes
+
+REDIS_URL / provider credentials
+
+Rate limiting, cache, queues, locks
+
+Yes
+
+PAYMENT_GATEWAY_KEY/SECRET
+
+Payment provider integration
+
+Yes
+
+PAYMENT_WEBHOOK_SECRET
+
+Webhook signature verification
+
+Yes
+
+NOTIFICATION_PROVIDER credentials
+
+SMS/WhatsApp/email
+
+Yes
+
+SENTRY_DSN or equivalent
+
+Error monitoring
+
+Provider-defined
+
+APP_BASE_URL
+
+Canonical public URL
+
+No / protected configuration
+
+TENANT_DEFAULT_TIMEZONE
+
+Business timezone
+
+No
+
+17.3 Deployment Gate
+
+OPS-DEP-001 [Must]: Production deployment shall require passing lint, type-check/build, automated tests and database contract/migration checks.  Source: Requirements baseline.
+
+OPS-DEP-002 [Must]: A staging environment shall be used for end-to-end payment and notification integration testing before production.  Source: Requirements baseline.
+
+OPS-DEP-003 [Must]: Secrets shall be present and validated; missing critical secrets shall fail deployment or startup.  Source: Requirements baseline.
+
+OPS-DEP-004 [Must]: Rollback instructions shall be documented and tested for application and database migration safety.  Source: Requirements baseline.
+
+OPS-DEP-005 [Must]: A smoke test shall verify login, customer onboarding, delivery, invoice and payment webhook behavior after deployment.  Source: Requirements baseline.
+
+18. Backup, Disaster Recovery & Business Continuity
+
+DR-OPS-001 [Must]: Production PostgreSQL shall have automated backups appropriate to business criticality.  Source: Requirements baseline.
+
+DR-OPS-002 [Must]: Point-in-time recovery shall be enabled when supported by the selected managed database plan.  Source: Requirements baseline.
+
+DR-OPS-003 [Must]: Recovery Point Objective (RPO) and Recovery Time Objective (RTO) shall be defined with the client before production go-live.  Source: Requirements baseline.
+
+DR-OPS-004 [Must]: At least one restore drill shall be performed before claiming production readiness.  Source: Requirements baseline.
+
+DR-OPS-005 [Must]: Application restart or horizontal scale-out shall not cause loss of committed business data.  Source: Requirements baseline.
+
+DR-OPS-006 [Must]: Queue and outbox processing shall recover without duplicating business effects.  Source: Requirements baseline.
+
+19. Data Flow / Interaction Summary
+
+19.1 Authentication Data Flow
+
+Browser -> /api/auth/login -> Validation -> User lookup -> Password verify        -> Session creation -> Secure cookie -> Protected request -> Auth gate -> Domain service
+
+19.2 Customer Request Data Flow
+
+Customer portal -> request API -> validate ownership -> create PENDING request-> staff queue -> approve/reject -> transaction -> ledger/subscription effect-> audit -> notification -> customer portal status
+
+19.3 Payment Data Flow
+
+Customer -> payment provider -> provider webhook -> HMAC verify -> idempotency-> invoice/amount check -> DB transaction -> payment + invoice balance-> receipt + audit -> notification
+
+20. Requirement Traceability Matrix
+
+Domain
+
+Primary Requirement IDs
+
+Verification
+
+Authentication
+
+FR-AUTH-001..013
+
+Unit + API + security + E2E
+
+Customer onboarding
+
+FR-CUST-001..009
+
+API + workflow + replay tests
+
+Profile/ownership
+
+FR-CUST-010..015
+
+API authorization + tenant isolation
+
+Tenant/staff
+
+FR-TEN-001..005
+
+RBAC + API tests
+
+Catalog/pricing
+
+FR-PROD-001..006
+
+Unit + integration + historical pricing
+
+Subscriptions
+
+FR-SUB-001..007
+
+State/version integration tests
+
+Delivery/ledger
+
+FR-DEL-001..010
+
+Domain + concurrency + E2E
+
+Requests/disputes
+
+FR-REQ-001..007; FR-DSP-001..005
+
+Workflow tests
+
+Routes/QR
+
+FR-ROUTE-001..004; FR-QR-001..005
+
+Authorization + route + QR tests
+
+Billing
+
+FR-BILL-001..008
+
+Financial invariant + E2E
+
+Payments
+
+FR-PAY-001..009
+
+Webhook + replay + amount + ledger tests
+
+Inventory/day close
+
+FR-INV-001..005
+
+Reconciliation + concurrency tests
+
+Notifications
+
+FR-NOT-001..005
+
+Queue/retry/idempotency tests
+
+Audit
+
+FR-AUD-001..006
+
+Integrity/tamper tests
+
+AI
+
+AI-ANA-001..004; AI-FC-001..005; AI-CHURN-001..003
+
+Backtest/evidence/safety tests
+
+Security
+
+SEC-001..017
+
+Red-team/security regression
+
+Operations
+
+NFR/OPS/DR requirements
+
+CI/CD, monitoring, recovery drills
+
+21. Implementation Alignment & Current-State Gap Register
+
+Purpose:  This section is intentionally separate from the requirements baseline. It records implementation-alignment checks that should be performed against the current GitHub repository before calling the system production-ready.
+
+Area
+
+Current Source/Documentation Signal
+
+Required Action Before Production
+
+Production authentication
+
+Repository documentation contains both real credential login and an older documented demo-login option.
+
+Remove demo authentication path and persona switching from production; keep test fixtures isolated.
+
+Public registration
+
+Current API documentation describes /api/auth/register as disabled for customer self-registration.
+
+Preserve this behavior and ensure UI/docs do not contradict it.
+
+Identity resolution
+
+Project history identified fallback-to-first-farmer behavior in DB scope resolution.
+
+Remove identity guessing; return authorization failure for missing/invalid farmer identity.
+
+Data persistence
+
+Current repository describes PostgreSQL/Neon as authoritative.
+
+Prove no production route falls back to in-memory store; keep store only for isolated test fixtures if needed.
+
+Schema/migration
+
+Project sources include Prisma schema and hand-written migration logic.
+
+Run schema-vs-database contract checks and remove migration drift before production rollout.
+
+Payment security
+
+Webhook design requires signature verification and idempotency.
+
+Verify no hardcoded secret fallback exists; verify raw-body HMAC and unique provider transaction reference.
+
+Redis usage
+
+Repository contains Redis modules.
+
+Ensure production auth rate limits/locks use shared Redis rather than process-local state where horizontal scaling exists.
+
+Hardcoded demo data
+
+Historical audits found seeded/demo values and static dashboard metrics in earlier revisions.
+
+Search and remove any production fallback/demo values from dashboards, analytics, AI and operational pages.
+
+README/API consistency
+
+Repository documentation has evolved over multiple iterations.
+
+Synchronize SRS, API docs, README and deployed behavior; remove stale examples and credentials.
+
+22. Production Readiness Checklist
+
+Check
+
+Acceptance Condition
+
+Identity
+
+Real users only; demo authentication removed; secure sessions; password reset/change verified
+
+Tenant security
+
+All protected APIs tenant-scoped; no client-controlled tenant/farmer/role identity
+
+Customer lifecycle
+
+Admin creation -> invite -> activate -> customer portal works end-to-end
+
+Subscriptions
+
+Effective-dated versions and change approvals verified
+
+Delivery
+
+Expected/actual/exception states and concurrency verified
+
+Closing
+
+Day/month close locks and correction workflows verified
+
+Billing
+
+Invoice uniqueness, immutable issued state, adjustment workflow verified
+
+Payments
+
+Gateway signature, amount validation, idempotency and replay handling verified
+
+Inventory
+
+Reconciliation formula and day finalization verified
+
+Notifications
+
+Queue/outbox, retry, provider failure behavior verified
+
+Audit
+
+Hash chain and tamper detection verified
+
+AI
+
+Evidence-backed output, insufficient-data behavior, no autonomous mutations
+
+Security
+
+IDOR, privilege escalation, injection, replay, rate-limit and session tests pass
+
+Performance
+
+Latency, pagination, batch endpoints and export behavior measured
+
+Observability
+
+Health/readiness, structured logs, alerts and metrics active
+
+DR
+
+Backups enabled; restore drill completed; RPO/RTO documented
+
+Deployment
+
+Separate staging/prod, secrets managed, clean production database, smoke test passed
+
+Documentation
+
+SRS, API, architecture, DB, security, privacy, deployment and runbooks synchronized
+
+Appendix A - Suggested Permission Matrix
+
+Permission
+
+OWNER
+
+MANAGER
+
+DELIVERY_AGENT
+
+ACCOUNTANT
+
+SUPPORT
+
+CUSTOMER
+
+SUPERADMIN
+
+customer.manage
+
+Y
+
+Y
+
+N
+
+N
+
+N
+
+N
+
+N
+
+subscription.manage
+
+Y
+
+Y
+
+N
+
+N
+
+N
+
+N
+
+N
+
+delivery.write
+
+Y
+
+Y
+
+Y
+
+N
+
+N
+
+N
+
+N
+
+route.manage
+
+Y
+
+Y
+
+N
+
+N
+
+N
+
+N
+
+N
+
+requests.approve
+
+Y
+
+Y
+
+N
+
+N
+
+N
+
+N
+
+N
+
+dispute.resolve
+
+Y
+
+Y
+
+N
+
+N
+
+N
+
+N
+
+N
+
+billing.manage
+
+Y
+
+Y
+
+N
+
+Y
+
+N
+
+N
+
+N
+
+payment.record
+
+Y
+
+Y
+
+N
+
+Y
+
+N
+
+N
+
+N
+
+inventory.close
+
+Y
+
+Y
+
+N
+
+N
+
+N
+
+N
+
+N
+
+audit.read
+
+Y
+
+Y
+
+N
+
+Y
+
+Y
+
+N
+
+Y
+
+report.export
+
+Y
+
+Y
+
+N
+
+Y
+
+Y
+
+N
+
+N
+
+staff.manage
+
+Y
+
+Y
+
+N
+
+N
+
+N
+
+N
+
+N
+
+platform.manage
+
+Y
+
+Y
+
+N
+
+N
+
+N
+
+N
+
+Y
+
+Note:  This is a baseline permission matrix. Production authorization should be implemented as explicit policy/configuration and reviewed with the client; role labels alone must not become a security boundary without server enforcement.
+
+Appendix B - Recommended API Contract Pattern
+
+Request metadata  Authorization: session cookie / secure token  Idempotency-Key: optional|required for risky mutation  Content-Type: application/jsonSuccess{ "success": true, "data": { ... }, "requestId": "req_..." }Error{ "success": false, "error": { "code": "...", "message": "...", "requestId": "..." } }
+
+Appendix C - Recommended Repository Controls
+
+main branch is the controlled implementation branch for this project, as chosen by the project owner.
+
+CI shall run lint, build/type-check, tests and database contract validation on every main-branch change.
+
+Secrets scanning shall run in CI.
+
+Dependency security scanning shall run regularly.
+
+Schema migrations shall be reviewed and tested before production application.
+
+Release tags should identify known-good production states.
+
+Appendix D - Minimum Client Acceptance Journey
+
+1. Owner logs in with real credentials2. Owner completes business profile3. Owner creates Customer A4. Customer A receives invitation and activates5. Owner creates Customer A subscription6. System generates expected delivery7. Delivery Agent records actual delivery8. Customer sees the same delivery9. Owner generates invoice10. Customer sees invoice11. Customer pays12. Gateway webhook is verified13. Invoice becomes paid/reconciled14. Receipt is available15. Audit chain shows the business events16. Cross-tenant and unauthorized attempts are rejected
+
+Appendix E - Requirement Quality Rules
+
+Every SHALL requirement must be observable/testable.
+
+Requirements must be implementation-independent unless the implementation constraint is itself mandatory.
+
+No requirement should depend on fabricated data or demo users.
+
+Historical facts should be immutable by default; corrections should be explicit.
+
+Security requirements apply to every API, not only UI routes.
+
+External providers must be treated as untrusted dependencies whose responses are validated.
+
+AI output is never equivalent to authoritative business state.
+
+Document End
+
+This SRS is the target requirements baseline for the MilkFlow platform. Implementation completion shall be determined by traceable evidence from source code, automated tests, staging verification, production configuration checks, and successful execution of the client acceptance journey. Requirements may be changed only through documented change control and versioning.
