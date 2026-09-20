@@ -76,13 +76,14 @@ async function verifyDbCredentials(
     }
 
     if (res.rows.length === 0) {
-      return { error: 'No account found with these credentials. Please check or register.', status: 401 };
+      // FR-AUTH-002: generic failure — do not reveal account existence.
+      return { error: 'Invalid login credentials. Please check and try again.', status: 401 };
     }
     const row = res.rows[0];
 
     // Password verification
     if (!password || !verifyPassword(password, row.passwordHash, row.passwordSalt)) {
-      return { error: 'Invalid login credentials or password. Please check and try again.', status: 401 };
+      return { error: 'Invalid login credentials. Please check and try again.', status: 401 };
     }
 
     // Gatekeeper: Inactive / Pending Account
@@ -208,8 +209,9 @@ export async function POST(req: NextRequest) {
             email: user.email,
           };
         } else {
+          // FR-AUTH-002: same generic message as DB path.
           return NextResponse.json(
-            { success: false, error: 'No account found with these credentials. Please check or register.' },
+            { success: false, error: 'Invalid login credentials. Please check and try again.' },
             { status: 401 }
           );
         }

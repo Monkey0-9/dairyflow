@@ -209,19 +209,19 @@ export class MilkFlowStore {
     // 1. Users with tenantId
     this.users = [
       {
-        id: 'user_prakash',
+        id: 'user_admin',
         tenantId: this.tenantId,
-        name: 'Estate Administrator',
-        email: 'admin@milkflow.in',
-        phone: '+91 98765 43210',
-        role: 'FARMER',
+        name: 'Praveen',
+        email: 'prakashpraveen046@gmail.com',
+        phone: '+919980592787',
+        role: 'SUPERADMIN',
       },
       {
         id: 'user_farmer',
         tenantId: this.tenantId,
-        name: 'Suresh Patel (Farmer)',
-        email: 'suresh@greenvalleydairy.in',
-        phone: '+91 98765 43210',
+        name: 'Prakash',
+        email: 'prakashpraveen239@gmail.com',
+        phone: '+99980592787',
         role: 'FARMER',
       },
       {

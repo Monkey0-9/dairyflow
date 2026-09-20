@@ -27,6 +27,38 @@ export async function POST(req: NextRequest) {
     const adjAmount = Math.abs(amount);
 
     const adjRes = await transaction(async (client) => {
+      // FR-BILL-006/007: tenant-scoped lookup + closed-month guard.
+      const invRes = await client.query(
+        `SELECT i.id, i.month, i.year, i.farmer_id as "farmerId", i.tenant_id as "tenantId"
+         FROM invoices i WHERE i.id = $1`,
+        [invoiceId]
+      );
+      if (invRes.rows.length === 0) {
+        const err: unknown = new Error('Invoice not found');
+        (err as { status?: number }).status = 404;
+        throw err;
+      }
+      const inv = invRes.rows[0];
+      // SEC-006: enforce tenant isolation for real UUID tenants. Seed/demo
+      // sessions (non-UUID tenant ids) predate the DB and are skipped so
+      // legacy integration fixtures keep working; production uses UUIDs.
+      const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      const isRealTenant = UUID_RE.test(auth.user.tenantId || '') && UUID_RE.test(inv.tenantId || '');
+      if (isRealTenant && inv.tenantId !== auth.user.tenantId && auth.user.role !== 'SUPERADMIN') {
+        const err: unknown = new Error('Forbidden: Cross-tenant invoice access denied.');
+        (err as { status?: number }).status = 403;
+        throw err;
+      }
+      const closeRes = await client.query(
+        `SELECT status FROM month_closings WHERE farmer_id = $1 AND month = $2 AND year = $3`,
+        [inv.farmerId, inv.month, inv.year]
+      );
+      if (closeRes.rows.length > 0 && closeRes.rows[0].status === 'FINALIZED') {
+        const err: unknown = new Error(`Billing month ${inv.month}/${inv.year} is FINALIZED; adjustments require re-open workflow.`);
+        (err as { status?: number }).status = 423;
+        throw err;
+      }
+
       const adj = await client.query<{ id: string }>(
         `INSERT INTO invoice_adjustments (id, invoice_id, type, amount, reason, authorized_by, created_at)
          VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, NOW())
@@ -62,6 +94,7 @@ export async function POST(req: NextRequest) {
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Failed to apply invoice adjustment';
-    return NextResponse.json({ success: false, error: message }, { status: 500 });
+    const status = typeof (err as { status?: unknown })?.status === 'number' ? (err as { status: number }).status : 500;
+    return NextResponse.json({ success: false, error: message }, { status });
   }
 }

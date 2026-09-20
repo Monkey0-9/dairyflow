@@ -85,6 +85,15 @@ export async function generateMonthlyInvoice(params: {
   year: number;
 }): Promise<{ success: boolean; invoiceId?: string; error?: string }> {
   return transaction(async (client) => {
+    // FR-BILL-007: closed months are immutable for ordinary invoice writes.
+    const closeRes = await client.query(
+      `SELECT status FROM month_closings WHERE farmer_id = $1 AND month = $2 AND year = $3`,
+      [params.farmerId, params.month, params.year]
+    );
+    if (closeRes.rows.length > 0 && closeRes.rows[0].status === 'FINALIZED') {
+      return { success: false, error: `Billing month ${params.month}/${params.year} is FINALIZED and locked.` };
+    }
+
     // 1. Check if invoice already exists
     const existing = await client.query(
       `SELECT id FROM invoices WHERE customer_id = $1 AND month = $2 AND year = $3`,
@@ -112,7 +121,8 @@ export async function generateMonthlyInvoice(params: {
     // Postgres, which made every invoice generation fail.
     const idRes = await client.query(`SELECT gen_random_uuid() as id`);
     const invoiceId = idRes.rows[0].id as string;
-    const dueDate = new Date(params.year, params.month, 5); // 5th of next month
+    // dueDate: 5th of the month following the billing month.
+    const dueDate = new Date(params.year, params.month, 5);
 
     for (const d of delRes.rows) {
       totalQuantity += d.qty;
@@ -120,11 +130,20 @@ export async function generateMonthlyInvoice(params: {
       totalAmount += lineAmt;
     }
 
-    await client.query(
-      `INSERT INTO invoices (id, tenant_id, customer_id, farmer_id, month, year, total_quantity, total_amount, paid_amount, outstanding_amount, status, due_date)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 0.0, $8, 'UNPAID', $9)`,
-      [invoiceId, params.tenantId, params.customerId, params.farmerId, params.month, params.year, totalQuantity, totalAmount, dueDate]
-    );
+    try {
+      await client.query(
+        `INSERT INTO invoices (id, tenant_id, customer_id, farmer_id, month, year, total_quantity, total_amount, paid_amount, outstanding_amount, status, due_date)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 0.0, $8, 'UNPAID', $9)`,
+        [invoiceId, params.tenantId, params.customerId, params.farmerId, params.month, params.year, totalQuantity, totalAmount, dueDate]
+      );
+    } catch (e: unknown) {
+      // FR-BILL-002 race: concurrent duplicate generation → idempotent conflict.
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg.includes('duplicate') || msg.includes('unique') || (e as { code?: string })?.code === '23505') {
+        return { success: false, error: `Invoice already exists for month ${params.month}/${params.year}` };
+      }
+      throw e;
+    }
 
     // 3. Populate itemized invoice items
     for (const d of delRes.rows) {

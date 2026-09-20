@@ -67,7 +67,7 @@ describe('System Testing: Authentication API Endpoints', () => {
 
       expect(res.status).toBe(401);
       expect(data.success).toBe(false);
-      expect(data.error).toContain('No account found');
+      expect(data.error).toContain('Invalid login credentials');
     });
   });
 

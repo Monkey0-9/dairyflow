@@ -188,6 +188,38 @@ export async function verifyAuditChain(tenantId: string): Promise<{
             reason: `Broken chain link at block ${i}: expected previousHash ${prevBlock.currentHash}, found ${b.previousHash}`,
           };
         }
+        // Index continuity
+        if (b.index !== prevBlock.index + 1) {
+          return {
+            valid: false,
+            totalBlocks: blocks.length,
+            tamperedBlockIndex: i,
+            reason: `Index gap at block ${i}: expected ${prevBlock.index + 1}, found ${b.index}`,
+          };
+        }
+      }
+
+      // FR-AUD-004/005: recompute content hash so payload tampering is detected,
+      // not just broken links.
+      const recomputed = computeBlockHash({
+        index: b.index,
+        timestamp: b.timestamp,
+        actorId: b.actorId,
+        actorRole: b.actorRole,
+        entityType: b.entityType,
+        entityId: b.entityId,
+        action: b.action,
+        beforeState: b.beforeState || '{}',
+        afterState: b.afterState || '{}',
+        previousHash: b.previousHash,
+      });
+      if (recomputed !== b.currentHash) {
+        return {
+          valid: false,
+          totalBlocks: blocks.length,
+          tamperedBlockIndex: i,
+          reason: `Content tamper detected at block ${i} (index ${b.index})`,
+        };
       }
     }
 

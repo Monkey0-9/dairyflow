@@ -20,29 +20,45 @@ export async function POST(req: NextRequest) {
     }
     const rawBody = await req.text();
     const signature = req.headers.get('x-razorpay-signature') || req.headers.get('x-webhook-signature');
-    const secret = process.env.RAZORPAY_WEBHOOK_SECRET || 'whsec_milkflow_prod_demo_key_9812';
+    // Test fallback secret mirrors test suites; production still fail-closes
+    // when RAZORPAY_WEBHOOK_SECRET is absent (see check below).
+    const secret = process.env.RAZORPAY_WEBHOOK_SECRET || (isTestMode() ? 'whsec_milkflow_prod_demo_key_9812' : undefined);
 
-    if (process.env.NODE_ENV === 'production' && !process.env.RAZORPAY_WEBHOOK_SECRET) {
-      return NextResponse.json(
-        { success: false, error: 'Server misconfigured: RAZORPAY_WEBHOOK_SECRET missing in production environment.' },
-        { status: 500 }
-      );
+    // FR-PAY-003/004 + SEC-013: fail closed when secret missing (all envs except unit tests).
+    if (!secret) {
+      if (isTestMode()) {
+        // unit tests exercise idempotency without live secrets
+      } else {
+        return NextResponse.json(
+          { success: false, error: 'Server misconfigured: RAZORPAY_WEBHOOK_SECRET missing.' },
+          { status: 500 }
+        );
+      }
     }
 
-    if (process.env.NODE_ENV === 'production' && !signature) {
+    // Require signature outside unit-test mode.
+    if (!isTestMode() && !signature) {
       return NextResponse.json(
         { success: false, error: 'Missing webhook HMAC signature' },
         { status: 401 }
       );
     }
 
-    if (signature) {
+    if (signature && secret) {
       const expectedSignature = crypto
         .createHmac('sha256', secret)
         .update(rawBody)
         .digest('hex');
 
-      if (signature !== expectedSignature) {
+      let valid = false;
+      try {
+        const a = Buffer.from(expectedSignature, 'hex');
+        const b = Buffer.from(signature, 'hex');
+        valid = a.length === b.length && crypto.timingSafeEqual(a, b);
+      } catch {
+        valid = false;
+      }
+      if (!valid) {
         return NextResponse.json(
           { success: false, error: 'Invalid webhook HMAC signature' },
           { status: 401 }
@@ -93,6 +109,13 @@ export async function POST(req: NextRequest) {
         method: paymentMethod || 'UPI',
         transactionRef,
       });
+
+      if (!result.success) {
+        return NextResponse.json(
+          { success: false, error: result.error || 'Payment rejected by business validation' },
+          { status: 422 }
+        );
+      }
 
       if (isTestMode()) {
         try {

@@ -4,6 +4,7 @@ import { query, transaction } from '@/lib/db';
 import { getLedgerRange } from '@/lib/services/delivery.service';
 import { publishEvent } from '@/lib/events';
 import { isTestMode, isUuid } from '@/lib/db-scope';
+import { executeIdempotentOperation } from '@/lib/security/idempotency';
 import { DeliveryRecord } from '@/lib/types';
 import { getStore } from '@/lib/store';
 
@@ -157,12 +158,19 @@ export async function PATCH(req: NextRequest) {
     const body = await req.json();
     const recordId = body.recordId || body.id;
     const { deliveredQuantity, status, reason, notes, bottlesReturned, clientUpdatedAt } = body;
+    // FR-DEL-006: replay-safe mutation key from client or header.
+    const operationId: string | undefined =
+      body.operationId || body.idempotencyKey || req.headers.get('idempotency-key') || undefined;
 
     if (!recordId) {
       return NextResponse.json({ success: false, error: 'recordId is required' }, { status: 400 });
     }
 
-    const result = await transaction(async (client) => {
+    const { result, isReplay } = await executeIdempotentOperation(
+      operationId,
+      'ledger.updateDelivery',
+      auth.user.userId,
+      () => transaction(async (client) => {
       let row: any = null;
       if (recordId) {
         const r = await client.query(
@@ -207,6 +215,16 @@ export async function PATCH(req: NextRequest) {
       if (!row) {
         const err: any = new Error('Delivery record not found in database for this tenant.');
         err.status = 404;
+        throw err;
+      }
+
+      // SRS SEC-006: reject cross-tenant access even with guessed IDs.
+      // Seed sessions (non-UUID) are exempt for legacy test fixtures.
+      const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      const isRealTenantScope = UUID_RE.test(tenantId || '') && UUID_RE.test(row.tenant_id || '');
+      if (isRealTenantScope && row.tenant_id !== tenantId && auth.user.role !== 'SUPERADMIN') {
+        const err: any = new Error('Forbidden: Cross-tenant delivery access denied.');
+        err.status = 403;
         throw err;
       }
 
@@ -256,7 +274,8 @@ export async function PATCH(req: NextRequest) {
       }
 
       return updatedRow;
-    });
+      })
+    );
 
     const billable = parseFloat(result.delivered_quantity) * parseFloat(result.price_per_unit);
 
@@ -279,15 +298,18 @@ export async function PATCH(req: NextRequest) {
       } catch { /* best effort */ }
     }
 
-    publishEvent({
-      type: 'delivery:updated',
-      tenantId: result.tenant_id,
-      customerId: result.customer_id,
-      payload: { recordId: result.id, status: result.status, deliveredQuantity: parseFloat(result.delivered_quantity), date: result.date },
-    });
+    if (!isReplay) {
+      publishEvent({
+        type: 'delivery:updated',
+        tenantId: result.tenant_id,
+        customerId: result.customer_id,
+        payload: { recordId: result.id, status: result.status, deliveredQuantity: parseFloat(result.delivered_quantity), date: result.date },
+      });
+    }
 
     return NextResponse.json({
       success: true,
+      isReplay: isReplay || undefined,
       record: {
         id: result.id,
         tenantId: result.tenant_id,

@@ -54,27 +54,33 @@ export function verifyRazorpayPaymentSignature(params: {
  * No complex gateway integrations needed.
  */
 export async function processPayment(params: ProcessPaymentParams): Promise<PaymentResult> {
+  // FR-PAY-005/006: idempotency anchor + amount guards before any credit.
+  const ref = (params.transactionRef || '').trim();
+  if (!ref) {
+    return { success: false, error: 'transactionRef is required' };
+  }
+  if (!Number.isFinite(params.amount) || params.amount <= 0) {
+    return { success: false, error: 'amount must be a positive number' };
+  }
   return transaction(async (client) => {
-    // 1. Check for duplicate payment if transactionRef provided
-    if (params.transactionRef) {
-      const existing = await client.query(
-        `SELECT id, amount, invoice_id FROM payments WHERE transaction_ref = $1`,
-        [params.transactionRef]
-      );
+    // 1. Idempotency: duplicate provider reference returns current invoice state.
+    const existing = await client.query(
+      `SELECT id, amount, invoice_id FROM payments WHERE transaction_ref = $1`,
+      [ref]
+    );
 
-      if (existing.rows.length > 0) {
-        const invRes = await client.query(
-          `SELECT outstanding_amount::float as "outstandingAmount", status FROM invoices WHERE id = $1`,
-          [params.invoiceId]
-        );
-        return {
-          success: true,
-          isDuplicate: true,
-          paymentId: existing.rows[0].id,
-          newOutstandingAmount: invRes.rows[0]?.outstandingAmount,
-          newStatus: invRes.rows[0]?.status,
-        };
-      }
+    if (existing.rows.length > 0) {
+      const invRes = await client.query(
+        `SELECT outstanding_amount::float as "outstandingAmount", status FROM invoices WHERE id = $1`,
+        [params.invoiceId]
+      );
+      return {
+        success: true,
+        isDuplicate: true,
+        paymentId: existing.rows[0].id,
+        newOutstandingAmount: invRes.rows[0]?.outstandingAmount,
+        newStatus: invRes.rows[0]?.status,
+      };
     }
 
     // 2. Fetch target invoice
@@ -89,6 +95,11 @@ export async function processPayment(params: ProcessPaymentParams): Promise<Paym
     }
 
     const invoice = invRes.rows[0];
+    const outstanding = Number(invoice.totalAmount) - Number(invoice.paidAmount);
+    // FR-PAY-006: partial payments allowed; overpayments are clamped to zero
+    // outstanding (no negative balances) until an explicit credit-balance
+    // model is introduced. Amount was already validated positive above.
+    void outstanding;
     const newPaidAmount = invoice.paidAmount + params.amount;
     const newOutstanding = Math.max(0, invoice.totalAmount - newPaidAmount);
     const newStatus = newOutstanding <= 0 ? 'PAID' : 'PARTIALLY_PAID';
@@ -99,7 +110,7 @@ export async function processPayment(params: ProcessPaymentParams): Promise<Paym
     await client.query(
       `INSERT INTO payments (id, tenant_id, invoice_id, customer_id, farmer_id, amount, method, transaction_ref, status)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'SUCCESS')`,
-      [paymentId, params.tenantId, params.invoiceId, params.customerId, params.farmerId, params.amount, params.method || 'CASH', params.transactionRef || '']
+      [paymentId, params.tenantId, params.invoiceId, params.customerId, params.farmerId, params.amount, params.method || 'CASH', ref]
     );
 
     // 4. Update invoice amounts

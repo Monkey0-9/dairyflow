@@ -339,8 +339,12 @@ export default function AdminPage() {
     await loadAdminData();
   };
 
-  // Persona switcher handler
+  // Persona switcher handler — dev/test only. Production rejects demoUserId (403).
   const handlePersonaChange = async (_role: string, userId: string) => {
+    if (process.env.NODE_ENV === 'production' && process.env.NEXT_PUBLIC_DEMO_MODE !== 'true') {
+      setSaveError('Persona switching is disabled in production. Please sign in with real credentials.');
+      return;
+    }
     try {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
@@ -386,26 +390,30 @@ export default function AdminPage() {
     );
   }
 
+  // SRS AI-ANA-003: never present fabricated metrics in production.
+  // When operational stats are unavailable, derive empty-state zeros from
+  // real customer counts instead of hardcoded demo litres/revenue.
+  const activeCustomers = customers.filter((c) => c.active).length;
   const stats = operationalStats || {
     date: selectedDate,
-    totalCustomers: customers.filter((c) => c.active).length,
-    expectedLitres: 7.0,
-    deliveredLitres: 4.5,
-    partialLitres: 0.5,
-    skippedLitres: 1.0,
-    extraLitres: 0.0,
-    billableLitres: 4.5,
-    todayRevenue: 225.0,
-    todayCollected: 725.0,
-    todayOutstanding: 0.0,
-    productBreakdown: { cow: 1.5, buffalo: 1.0, a2: 2.0 },
+    totalCustomers: activeCustomers,
+    expectedLitres: 0,
+    deliveredLitres: 0,
+    partialLitres: 0,
+    skippedLitres: 0,
+    extraLitres: 0,
+    billableLitres: 0,
+    todayRevenue: 0,
+    todayCollected: 0,
+    todayOutstanding: 0,
+    productBreakdown: { cow: 0, buffalo: 0, a2: 0 },
     exceptionCounts: {
-      partial: 1,
-      skipped: 1,
+      partial: 0,
+      skipped: 0,
       disputes: openDisputeCount,
       extraRequests: pendingExtraCount,
       pendingCustomers: pendingCustomerCount,
-      overdueInvoices: 1,
+      overdueInvoices: 0,
     },
   };
 
