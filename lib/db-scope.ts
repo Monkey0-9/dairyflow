@@ -73,17 +73,28 @@ export async function resolveDbScope(session?: SessionUser | null): Promise<DbSc
   }
 
   if (!farmerId) {
-    // Lookup farmer associated with user or tenant
-    const f = await query(
-      `SELECT f.id FROM farmer_profiles f
-       WHERE f.tenant_id = $1
-       ORDER BY f.created_at ASC LIMIT 1`,
-      [tenantId]
-    );
-    if (f.rows.length > 0) {
-      farmerId = f.rows[0].id as string;
-    } else {
-      throw new Error(`No farmer profile found for tenant '${tenantId}'.`);
+    const uid = session.userId || ('id' in session && typeof session.id === 'string' ? session.id : '');
+    if (uid) {
+      // Check if user is a farmer
+      const f = await query(
+        `SELECT id FROM farmer_profiles WHERE user_id = $1 AND tenant_id = $2`,
+        [uid, tenantId]
+      );
+      if (f.rows.length > 0) {
+        farmerId = f.rows[0].id as string;
+      } else {
+        // Check if user is a customer with an assigned farmer
+        const c = await query(
+          `SELECT farmer_id FROM customer_profiles WHERE user_id = $1 AND tenant_id = $2`,
+          [uid, tenantId]
+        );
+        if (c.rows.length > 0 && c.rows[0].farmer_id) {
+          farmerId = c.rows[0].farmer_id as string;
+        }
+      }
+    }
+    if (!farmerId) {
+      throw new Error(`Unauthorized: No valid farmer profile or relationship found for user '${uid || 'unknown'}'.`);
     }
   }
 

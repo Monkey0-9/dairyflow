@@ -13,7 +13,7 @@ import { checkRateLimit } from '@/lib/security/rate-limiter';
 import { query } from '@/lib/db';
 
 const isUnitTest = () => process.env.TEST_ENV === 'unit' || process.env.VITEST === 'true';
-const demoLoginEnabled = () => isUnitTest() || process.env.DEMO_LOGIN_ENABLED !== 'false';
+const demoLoginEnabled = () => isUnitTest() || (process.env.NODE_ENV !== 'production' && process.env.DEMO_LOGIN_ENABLED === 'true');
 
 interface DbLoginRow {
   userId: string;
