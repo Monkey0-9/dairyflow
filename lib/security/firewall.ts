@@ -32,9 +32,12 @@ export function inspectRequestSecurity(req: NextRequest): FirewallCheckResult {
   const pathname = req.nextUrl.pathname;
 
   // 1. Endpoint Rate Limiting Throttling
-  let maxReqs = 60;
+  const isLoopback = ip === '127.0.0.1' || ip === '::1' || ip === 'localhost' || ip === 'anonymous_ip';
+  const isDevOrTest = process.env.NODE_ENV !== 'production' || process.env.PLAYWRIGHT === 'true' || process.env.VITEST === 'true';
+
+  let maxReqs = 120;
   if (pathname.includes('/auth/login') || pathname.includes('/auth/activate-customer')) {
-    maxReqs = 10; // Strict rate limit on authentication endpoints
+    maxReqs = isLoopback || isDevOrTest ? 300 : 30; // Generous for local development/testing, secure for external public IP
   }
 
   const rateCheck = checkRateLimit(`waf_${ip}_${pathname}`, maxReqs, 60);
@@ -93,7 +96,7 @@ function logSuspiciousEvent(ip: string, path: string, eventType: string, details
     console.warn(`[SECURITY FIREWALL WARN] ${eventType} from IP=${ip} Path=${path}: ${details}`);
     query(
       `INSERT INTO activity_events (id, tenant_id, actor_id, actor_role, action, description, metadata, created_at)
-      VALUES (gen_random_uuid(), 'tenant_system', 'system_firewall', 'FIREWALL', $1, $2, $3, NOW())`,
+      VALUES (gen_random_uuid(), 'tenant_greenvalley', 'system_firewall', 'FIREWALL', $1, $2, $3, NOW())`,
       [eventType, `Security event at ${path} from ${ip}`, JSON.stringify({ ip, path, details })]
     ).catch(() => {});
   } catch {

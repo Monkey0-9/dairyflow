@@ -1,0 +1,14 @@
+node_modules
+.next
+.git
+.gitignore
+.env*.local
+*.log
+npm-debug.log*
+test-results
+evidence
+tests
+e2e
+playwright-report
+MilkFlow_SRS_Complete_v1.0.docx
+MilkFlow_SRS_Extracted.txt

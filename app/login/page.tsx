@@ -46,7 +46,7 @@ function LoginForm() {
       });
       const data = await res.json();
       if (data.success) {
-        const dest = safeRedirect || data.redirectUrl || (data.user?.role === 'CUSTOMER' ? '/customer' : '/admin');
+        const dest = safeRedirect || data.redirectUrl || (data.user?.role === 'CUSTOMER' ? '/customer' : (data.user?.role === 'SUPERADMIN' ? '/superadmin' : '/admin'));
         router.push(dest);
         router.refresh();
       } else {

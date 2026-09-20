@@ -28,6 +28,7 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  output: process.env.DOCKER_BUILD === 'true' ? 'standalone' : undefined,
   turbopack: {
     // Lock Turbopack's root to this project directory
     root: path.resolve(__dirname, './'),
