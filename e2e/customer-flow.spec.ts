@@ -53,7 +53,7 @@ test.describe('Client Creation & Client Login E2E', () => {
     // Step 4: Verify navigation to Customer QR Verification page
     await page.goto('/customer/qr');
     await expect(page).toHaveURL(/\/customer\/qr/, { timeout: 10000 });
-    await expect(page.locator('canvas').or(page.locator('svg')).or(page.locator('text=QR'))).toBeVisible({ timeout: 8000 });
+    await expect(page.getByRole('heading', { name: 'Private Client Pass' })).toBeVisible({ timeout: 8000 });
 
     // Step 5: Test Client Login using EMAIL
     await page.context().clearCookies();

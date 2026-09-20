@@ -3,9 +3,10 @@ import { test, expect } from '@playwright/test';
 test.describe('Interactive JavaScript Command Palette E2E', () => {
   test('opens via keyboard shortcut Ctrl+K and navigates using commands', async ({ page }) => {
     await page.goto('/login');
+    await page.waitForLoadState('networkidle');
 
-    // Trigger keyboard shortcut Ctrl+K
-    await page.keyboard.press('Control+KeyK');
+    // Trigger keyboard shortcut Ctrl+k
+    await page.keyboard.press('Control+k');
 
     // Command palette modal should be visible
     const searchInput = page.locator('input[placeholder*="Type a command"]');
