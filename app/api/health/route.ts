@@ -30,7 +30,8 @@ export async function GET() {
   const totalLatency = Date.now() - startTime;
   const memoryUsage = process.memoryUsage();
 
-  const isHealthy = dbConnected && (dbLatency < 5000 || dbLatency === -1);
+  const redisDown = redis.configured && !redis.reachable;
+  const isHealthy = dbConnected && (dbLatency < 5000 || dbLatency === -1) && !redisDown;
 
   return NextResponse.json({
     status: isHealthy ? 'HEALTHY' : 'DEGRADED',

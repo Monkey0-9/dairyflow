@@ -175,7 +175,10 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // In-memory fallback
+    // In-memory fallback — unit tests only, never production (no fake phones).
+    if (!isUnitTest()) {
+      return NextResponse.json({ success: true, source: 'db', remindersSent: dispatched.length, details: dispatched });
+    }
     const store = getStore();
     let invs = store.invoices.filter((i) => i.outstandingAmount > 0 && i.status !== 'PAID');
     if (invoiceId) {
@@ -187,7 +190,8 @@ export async function POST(req: NextRequest) {
     for (const inv of invs) {
       const cust = store.customers.find((c) => c.id === inv.customerId);
       const user = cust ? store.users.find((u) => u.id === cust.userId) : undefined;
-      const phone = user?.phone || '9876543210';
+      const phone = user?.phone;
+      if (!phone) continue; // FR-NOT: never send to hardcoded demo numbers
       const name = cust?.name || user?.name || 'Customer';
 
       const result = await sendPaymentReminder({

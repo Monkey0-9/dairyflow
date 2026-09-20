@@ -3,11 +3,14 @@ import { getStore } from '@/lib/store';
 import { query } from '@/lib/db';
 import { isTestMode, newUuid, isUuid, resolveDbScope } from '@/lib/db-scope';
 import { CustomerProfile, Subscription } from '@/lib/types';
-import { getSessionUser } from '@/lib/auth';
+import { getSessionUser, hashPassword } from '@/lib/auth';
 import { generateRawInvitationToken, hashInvitationToken } from '@/lib/security/invitation-crypto';
 
 // Helper to sync real DB customers into in-memory store
 async function syncDbCustomersIntoStore() {
+  if (isTestMode()) {
+    return;
+  }
   const store = getStore();
   try {
     const res = await query<{
@@ -258,16 +261,17 @@ export async function POST(req: NextRequest) {
 
     // Dual-persist to PostgreSQL
     try {
+      const { hash, salt } = hashPassword(password);
       await query(
         `INSERT INTO users (id, tenant_id, email, phone, name, password_hash, password_salt, role, is_active)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true)
          ON CONFLICT (id) DO NOTHING`,
-        [newCustomer.userId, effectiveTenantId, email, body.phone, body.name, 'INVITED_PENDING_ACTIVATION', 'salt_temp', 'CUSTOMER']
+        [newCustomer.userId, effectiveTenantId, email, body.phone, body.name, hash, salt, 'CUSTOMER']
       );
 
       await query(
         `INSERT INTO customer_profiles (id, user_id, tenant_id, farmer_id, delivery_address, milk_type, daily_quantity, qr_token, is_active, status)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false, 'INVITED')
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, 'ACTIVE')
          ON CONFLICT (id) DO NOTHING`,
         [
           newCustomer.id,
@@ -587,14 +591,19 @@ async function createCustomerDurable(session: { userId: string; tenantId: string
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
     const todayStr = new Date().toISOString().split('T')[0];
 
+    const initialPassword = body.password && String(body.password).trim()
+      ? String(body.password).trim()
+      : `Milk#${Math.floor(1000 + Math.random() * 9000)}`;
+    const { hash, salt } = hashPassword(initialPassword);
+
     await query(
       `INSERT INTO users (id, tenant_id, email, phone, name, password_hash, password_salt, role, is_active)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'CUSTOMER', false)`,
-      [userId, scope.tenantId, email, body.phone, body.name, 'INVITED_PENDING_ACTIVATION', 'salt_temp']
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'CUSTOMER', true)`,
+      [userId, scope.tenantId, email, body.phone, body.name, hash, salt]
     );
     await query(
-      `INSERT INTO customer_profiles (id, user_id, tenant_id, farmer_id, delivery_address, milk_type, daily_quantity, qr_token, is_active)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false)`,
+      `INSERT INTO customer_profiles (id, user_id, tenant_id, farmer_id, delivery_address, milk_type, daily_quantity, qr_token, is_active, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, 'ACTIVE')`,
       [customerId, userId, scope.tenantId, farmerId, body.address || 'Local Residence', product.code, qty, `MK_QR_${newUuid().replace(/-/g, '').substring(0, 16)}`]
     );
     await query(
@@ -628,8 +637,13 @@ async function createCustomerDurable(session: { userId: string; tenantId: string
       customer: cached || { id: customerId, name: body.name, phone: body.phone, email, farmerId, tenantId: scope.tenantId },
       invitationToken: rawToken,
       invitationLink: `/activate?token=${rawToken}`,
-      credentials: { email, phone: body.phone, loginUrl: '/login' },
-    }, { status: 201 });
+      credentials: {
+        email,
+        phone: body.phone,
+        temporaryPassword: initialPassword,
+        loginUrl: '/login',
+      },
+    }, { status: 200 });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Failed to add customer';
     console.error('[Customer API POST] durable write failed:', error);
