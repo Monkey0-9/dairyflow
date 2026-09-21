@@ -49,7 +49,7 @@ test.describe('Client Creation & Client Login E2E', () => {
 
     // Verify redirected to /customer portal
     await expect(page).toHaveURL(/\/customer/, { timeout: 10000 });
-    await expect(page.locator(`text=${testName}`).or(page.locator('text=Customer Portal')).or(page.locator('text=MilkFlow'))).toBeVisible();
+    await expect(page.locator(`text=${testName}`).or(page.locator('text=Customer Portal')).or(page.locator('text=MilkFlow')).first()).toBeVisible();
 
     // Step 4: Verify navigation to Customer QR Verification page
     await page.goto('/customer/qr');
