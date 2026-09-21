@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
+import { LIVE_DB_TESTS_ENABLED } from '../setup';
 import { query } from '@/lib/db';
 
-describe('Move 3: Database as the Final Security Boundary', () => {
+describe.skipIf(!LIVE_DB_TESTS_ENABLED)('Move 3: Database as the Final Security Boundary', () => {
   const runId = `${Date.now()}_${Math.floor(Math.random() * 1000000)}`;
 
   it('proves PostgreSQL rejects negative daily quantity on customer_profiles via CHECK constraint', async () => {

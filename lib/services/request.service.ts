@@ -17,6 +17,7 @@ export interface UnifiedRequest {
   reviewedAt?: string | null;
   startDate?: string;
   endDate?: string;
+  milkType?: string;
   quantity?: number;
   newQuantity?: number;
   effectiveDate?: string;
@@ -113,9 +114,10 @@ export async function getUnifiedRequests(params: {
         customerPhone: r.customerPhone,
         farmerId: r.farmerId,
         status: r.status,
-        details: `Extra ${r.quantity}L ${r.milkType} milk on ${r.date}${r.notes ? ` (${r.notes})` : ''}`,
+        details: `Extra ${r.quantity}L ${r.milkType || 'Cow'} milk on ${r.date}${r.notes ? ` (${r.notes})` : ''}`,
         createdAt: r.createdAt,
         reviewedAt: r.reviewedAt,
+        milkType: r.milkType || 'Cow',
         quantity: r.quantity,
         startDate: r.date,
       });
@@ -356,13 +358,49 @@ export async function handleRequestAction(
       );
 
       if (action === 'APPROVE') {
-        // Update delivery record on that date to add extra milk
-        await client.query(
+        const milkKind = req.milk_type || 'Cow';
+        // 1. Try updating existing delivery record on that date
+        const updRes = await client.query(
           `UPDATE delivery_records
-           SET delivered_quantity = scheduled_quantity + $1, status = 'EXTRA', updated_at = NOW()
+           SET delivered_quantity = scheduled_quantity + $1, status = 'EXTRA', updated_at = NOW(),
+               notes = COALESCE(notes, '') || ' + Extra ' || $1 || 'L ' || $4
            WHERE customer_id = $2 AND date = $3`,
-          [req.quantity, req.customer_id, req.date]
+          [req.quantity, req.customer_id, req.date, milkKind]
         );
+
+        // 2. If no delivery record exists for that date yet, insert one so the extra milk is delivered
+        if (updRes.rowCount === 0) {
+          const prodRes = await client.query(
+            `SELECT p.id, p.price_per_unit FROM products p
+             WHERE p.tenant_id = $1 AND (p.code ILIKE '%' || $2 || '%' OR p.name ILIKE '%' || $2 || '%')
+             ORDER BY p.is_active DESC LIMIT 1`,
+            [req.tenant_id, milkKind]
+          );
+          const prodId = prodRes.rows[0]?.id || 'prod_cow_milk';
+          const price = prodRes.rows[0]?.price_per_unit || 60.00;
+
+          await client.query(
+            `INSERT INTO delivery_records (
+               id, tenant_id, customer_id, farmer_id, product_id, date,
+               scheduled_quantity, delivered_quantity, price_per_unit, status, notes
+             ) VALUES (
+               gen_random_uuid(), $1, $2, $3, $4, $5,
+               0.0, $6, $7, 'EXTRA', $8
+             ) ON CONFLICT (customer_id, date, product_id) DO UPDATE SET
+               delivered_quantity = delivery_records.delivered_quantity + $6,
+               status = 'EXTRA'`,
+            [
+              req.tenant_id,
+              req.customer_id,
+              req.farmer_id,
+              prodId,
+              req.date,
+              req.quantity,
+              price,
+              `Approved Extra ${milkKind} Milk (${req.quantity}L)`
+            ]
+          );
+        }
       }
 
       // Notify customer
@@ -371,14 +409,15 @@ export async function handleRequestAction(
         [req.customer_id]
       );
       if (custUserRes.rows[0]) {
+        const milkDisplay = req.milk_type || 'Cow';
         await client.query(
           `INSERT INTO notifications (id, tenant_id, user_id, title, message, type)
            VALUES (gen_random_uuid(), $1, $2, $3, $4, $5)`,
           [
             req.tenant_id,
             custUserRes.rows[0].user_id,
-            `Extra Milk Request ${newStatus}`,
-            `Your extra milk request for ${req.quantity}L on ${req.date} has been ${newStatus.toLowerCase()}.`,
+            `Extra ${milkDisplay} Milk Request ${newStatus}`,
+            `Your extra ${milkDisplay} milk request for ${req.quantity}L on ${req.date} has been ${newStatus.toLowerCase()}.`,
             action === 'APPROVE' ? 'SUCCESS' : 'WARNING',
           ]
         );

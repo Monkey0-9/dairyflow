@@ -21,6 +21,8 @@ export function getSessionSecret(): string {
     if (process.env.NODE_ENV === 'production') {
       throw new Error('[FATAL SECURITY CONFIGURATION ERROR] SESSION_SECRET must be set in production environment.');
     }
+    // In development, use a placeholder, but warn strongly.
+    console.warn('[SECURITY WARNING] Using default SESSION_SECRET in development. Set SESSION_SECRET in .env for better security.');
     return 'milkflow-enterprise-secure-session-key-2026';
   }
   if (process.env.NODE_ENV === 'production' && secret === 'milkflow-enterprise-secure-session-key-2026') {
@@ -204,7 +206,7 @@ export const PRESET_DEMO_USERS: Record<string, SessionUser> = {
   user_admin: {
     userId: 'user_admin',
     name: 'Platform SuperAdmin',
-    role: 'ADMIN',
+    role: 'SUPERADMIN',
     tenantId: 'tenant_platform',
     email: 'admin@milkflow.in',
   },

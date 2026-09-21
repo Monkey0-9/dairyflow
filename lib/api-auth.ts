@@ -27,7 +27,9 @@ export function authenticateRequest(
   const token = cookieToken || authHeader;
 
   if (!token) {
-    if (process.env.TEST_ENV === 'unit' || process.env.VITEST === 'true') {
+    // In production, this block should always return an unauthorized error.
+    // Test mode bypasses should be strictly controlled and ideally not present in production builds.
+    if (process.env.NODE_ENV !== 'production' && (process.env.TEST_ENV === 'unit' || process.env.VITEST === 'true')) {
       const isCustomerOnly = allowedRoles && allowedRoles.length > 0 && allowedRoles.includes('CUSTOMER') && !allowedRoles.includes('FARMER') && !allowedRoles.includes('ADMIN') && !allowedRoles.includes('OWNER');
       const testUser: SessionUser = {
         userId: isCustomerOnly ? 'user_ravi' : 'user_farmer',
@@ -159,7 +161,13 @@ export async function enforceActiveAccount(user: SessionUser): Promise<NextRespo
       { success: false, error: 'Forbidden: Account or dairy is suspended.' },
       { status: 403 }
     );
-  } catch {
-    return null; // fail-open when DB unreachable
+  } catch (error) {
+    console.error('Error enforcing active account:', error);
+    // Depending on policy, either rethrow or return a server error response
+    // For now, returning null means the request might proceed without proper account status check
+    return NextResponse.json(
+      { success: false, error: 'Internal server error during account status check' },
+      { status: 500 }
+    );
   }
 }

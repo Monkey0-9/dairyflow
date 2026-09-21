@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { LIVE_DB_TESTS_ENABLED } from '../setup';
 import { POST as transferPost, PATCH as transferPatch } from '@/app/api/customer/transfer/route';
 import { POST as priceHistoryPost, GET as priceHistoryGet } from '@/app/api/products/price-history/route';
 import { POST as invoiceAdjPost } from '@/app/api/invoices/adjustments/route';
@@ -10,7 +11,7 @@ import { encodeSignedSession, SESSION_COOKIE_NAME } from '@/lib/auth';
 import { NextRequest } from 'next/server';
 import { query } from '@/lib/db';
 
-describe('Enterprise Domain Matrix: Complete Operations Test Suite', () => {
+describe.skipIf(!LIVE_DB_TESTS_ENABLED)('Enterprise Domain Matrix: Complete Operations Test Suite', () => {
   const farmerSession = encodeSignedSession({
     userId: 'user_farmer',
     name: 'Suresh Patel',

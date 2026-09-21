@@ -8,6 +8,18 @@
 
 import { jsPDF } from 'jspdf';
 
+// Page Constants for A4 (portrait) in 'pt' units
+const A4_PAGE_HEIGHT = 842; // A4 height in points
+const TOP_MARGIN_ON_NEW_PAGE_INVOICE = 56; // Y-coordinate where content starts on a new page for downloadInvoicePdf
+const TOP_MARGIN_ON_NEW_PAGE_STATEMENT = 50; // Y-coordinate where content starts on a new page for generateStatementPDF
+const FOOTER_START_Y_INVOICE = 780; // Y-coordinate where the footer begins for downloadInvoicePdf
+const FOOTER_START_Y_STATEMENT = 800; // Y-coordinate where the footer begins for generateStatementPDF
+
+// Calculate the maximum Y-coordinate for content before a page break
+// This leaves a small buffer before the footer starts.
+const MAX_CONTENT_Y_INVOICE = FOOTER_START_Y_INVOICE - 20; // 20pt buffer from the footer for invoice
+const MAX_CONTENT_Y_STATEMENT = FOOTER_START_Y_STATEMENT - 20; // 20pt buffer from the footer for statement
+
 interface StatementLineItem {
   description: string;
   quantity: number;

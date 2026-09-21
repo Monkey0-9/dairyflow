@@ -1,11 +1,12 @@
 import { describe, it, expect } from 'vitest';
+import { LIVE_DB_TESTS_ENABLED } from '../setup';
 import { query, transaction } from '@/lib/db';
 import { hashPassword } from '@/lib/auth';
 import { recalculateInvoice } from '@/lib/services/billing.service';
 import { updateDeliveryStatus } from '@/lib/services/delivery.service';
 import { appendAuditLog, verifyAuditChain } from '@/lib/services/audit.service';
 
-describe('Stage 2: Real PostgreSQL Database Integration Testing', () => {
+describe.skipIf(!LIVE_DB_TESTS_ENABLED)('Stage 2: Real PostgreSQL Database Integration Testing', () => {
   // Use a dedicated isolated test tenant so real database runs do not conflict
   const runId = `${Date.now()}_${Math.floor(Math.random() * 1000000)}`;
   const testTenantId = `tenant_stage2_${runId}`;

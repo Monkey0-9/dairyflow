@@ -29,6 +29,8 @@ interface BillingManagerProps {
     paymentMethod: PaymentMethod,
     note?: string
   ) => Promise<void>;
+  dairyName?: string;
+  upiId?: string;
 }
 
 export default function BillingManager({
@@ -36,6 +38,8 @@ export default function BillingManager({
   onRefresh,
   onRecalculateAll,
   onRecordPayment,
+  dairyName = 'Dairy Farm',
+  upiId = '',
 }: BillingManagerProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
@@ -49,7 +53,70 @@ export default function BillingManager({
   // Failed payment saves keep the modal open with the server message.
   const [payError, setPayError] = useState<string | null>(null);
   const [recalcError, setRecalcError] = useState<string | null>(null);
+  const [pendingPayments, setPendingPayments] = useState<any[]>([]);
+  const [verifyingPaymentId, setVerifyingPaymentId] = useState<string | null>(null);
   const { t } = useT();
+
+  const fetchPendingPayments = async () => {
+    try {
+      const res = await fetch('/api/payments?status=PENDING');
+      const data = await res.json();
+      if (data.success && Array.isArray(data.payments)) {
+        setPendingPayments(data.payments);
+      }
+    } catch (err) {
+      console.error('[BillingManager] Failed to fetch pending payments:', err);
+    }
+  };
+
+  React.useEffect(() => {
+    fetchPendingPayments();
+  }, [invoices]);
+
+  const handleConfirmPendingPayment = async (paymentId: string) => {
+    setVerifyingPaymentId(paymentId);
+    try {
+      const res = await fetch('/api/payments', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paymentId, action: 'CONFIRM' }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        await fetchPendingPayments();
+        onRefresh();
+      } else {
+        alert(data.error || 'Failed to confirm payment');
+      }
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Error confirming payment');
+    } finally {
+      setVerifyingPaymentId(null);
+    }
+  };
+
+  const handleRejectPendingPayment = async (paymentId: string) => {
+    if (!confirm('Are you sure you want to reject this payment UTR verification?')) return;
+    setVerifyingPaymentId(paymentId);
+    try {
+      const res = await fetch('/api/payments', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paymentId, action: 'REJECT' }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        await fetchPendingPayments();
+        onRefresh();
+      } else {
+        alert(data.error || 'Failed to reject payment');
+      }
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Error rejecting payment');
+    } finally {
+      setVerifyingPaymentId(null);
+    }
+  };
 
   // Financial KPI totals
   let totalBilled = 0;
@@ -156,10 +223,10 @@ export default function BillingManager({
   const handleSendWhatsAppReminder = (inv: Invoice) => {
     const message = buildReminderMessage({
       customerName: inv.customerName,
-      dairyName: 'GreenValley Dairy Farm',
+      dairyName: dairyName,
       amount: inv.outstandingAmount,
       lang: reminderLang,
-      payLink: 'greenvalley@okaxis',
+      payLink: upiId || undefined,
     });
     window.open(buildWhatsAppLink(inv.customerPhone, message), '_blank');
   };
@@ -174,7 +241,7 @@ export default function BillingManager({
             <span>{t('billing.title')}</span>
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            September 2026 • Ledger-calculated dynamically with instant offline/online payment tracking
+            {new Date().toLocaleString('en-US', { month: 'long', year: 'numeric' })} • Ledger-calculated dynamically with instant offline/online payment tracking
           </p>
         </div>
 
@@ -260,6 +327,71 @@ export default function BillingManager({
           <div className="text-[11px] text-rose-600 font-semibold mt-0.5">Pending Collection</div>
         </div>
       </div>
+
+      {/* Pending Client UPI Verifications (Action Required) */}
+      {pendingPayments.length > 0 && (
+        <div className="bg-amber-50/80 border-2 border-amber-300 rounded-3xl p-5 shadow-xs space-y-3">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse" />
+              <h3 className="text-sm font-black text-amber-950 uppercase tracking-wider flex items-center gap-2">
+                <span>Client UPI Payments Awaiting Admin Verification</span>
+                <span className="px-2 py-0.5 rounded-full bg-amber-200 text-amber-900 text-xs font-mono font-bold">
+                  {pendingPayments.length} pending
+                </span>
+              </h3>
+            </div>
+            <span className="text-xs text-amber-800">
+              Cross-check the UTR on your PhonePe statement, then confirm or reject.
+            </span>
+          </div>
+
+          <div className="divide-y divide-amber-200/60 bg-white rounded-2xl border border-amber-200 overflow-hidden">
+            {pendingPayments.map((p) => (
+              <div key={p.id} className="p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 text-xs">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-slate-900 text-sm">{p.customerName || 'Client Account'}</span>
+                    {p.customerCode && (
+                      <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200">
+                        {p.customerCode}
+                      </span>
+                    )}
+                    <span className="font-mono font-bold text-amber-700">#{p.invoiceNumber || p.invoiceId.slice(0, 8)}</span>
+                  </div>
+                  <div className="text-slate-600 flex flex-wrap items-center gap-3">
+                    <span className="font-mono text-emerald-700 font-black text-sm">₹{Number(p.amount).toFixed(2)}</span>
+                    <span>•</span>
+                    <span>UTR: <strong className="font-mono text-slate-900 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">{p.transactionRef}</strong></span>
+                    <span>•</span>
+                    <span>Mode: <strong className="text-purple-700">{p.paymentMethod || 'UPI'}</strong></span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 w-full md:w-auto">
+                  <button
+                    type="button"
+                    disabled={verifyingPaymentId === p.id}
+                    onClick={() => handleConfirmPendingPayment(p.id)}
+                    className="flex-1 md:flex-initial px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold transition flex items-center justify-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-50"
+                  >
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>{verifyingPaymentId === p.id ? 'Confirming...' : '✓ Confirm Client Paid'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={verifyingPaymentId === p.id}
+                    onClick={() => handleRejectPendingPayment(p.id)}
+                    className="px-3 py-2 rounded-xl border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold transition cursor-pointer disabled:opacity-50"
+                  >
+                    ✕ Reject
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Filter and Search Bar */}
       <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3 bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">

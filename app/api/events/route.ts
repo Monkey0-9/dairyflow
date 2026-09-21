@@ -40,10 +40,25 @@ export async function GET(req: Request) {
   const stream = new ReadableStream({
     start(controller) {
       const encoder = new TextEncoder();
+      let cleanedUp = false;
+      const cleanup = () => {
+        if (cleanedUp) return;
+        cleanedUp = true;
+        clearInterval(heartbeat);
+        unsubscribe();
+        try {
+          controller.close();
+        } catch (_closeErr) {
+          // Stream already closed or aborted by client
+        }
+      };
+
       const send = (data: unknown) => {
         try {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
-        } catch { /* client gone */ }
+        } catch (_sendErr) {
+          cleanup();
+        }
       };
 
       // Initial hello + recent history (scoped)
@@ -59,16 +74,10 @@ export async function GET(req: Request) {
       const heartbeat = setInterval(() => {
         try {
           controller.enqueue(encoder.encode(`: heartbeat\n\n`));
-        } catch { /* ignore */ }
+        } catch (_beatErr) {
+          cleanup();
+        }
       }, 25000);
-
-      const cleanup = () => {
-        clearInterval(heartbeat);
-        unsubscribe();
-        try {
-          controller.close();
-        } catch { /* already closed */ }
-      };
 
       req.signal.addEventListener('abort', cleanup);
     },

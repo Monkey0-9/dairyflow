@@ -22,15 +22,23 @@ export default function AIForecastingView() {
   const [loading, setLoading] = useState(true);
   const [showCopilot, setShowCopilot] = useState(false);
 
+  const tomorrowStr = React.useMemo(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+  }, []);
+
   useEffect(() => {
     fetch('/api/forecast')
       .then((res) => res.json())
       .then((data) => {
         if (data.success) {
           setForecast(data.forecast);
+        } else {
+          console.error('[AIForecastingView] Forecast API error:', data.error);
         }
       })
-      .catch((err) => console.error(err))
+      .catch((err) => console.error('[AIForecastingView] Failed to load forecast:', err))
       .finally(() => setLoading(false));
   }, []);
 
@@ -69,7 +77,7 @@ export default function AIForecastingView() {
             Ask AI Copilot
           </button>
           <span className="text-xs bg-amber-50 text-amber-900 border border-amber-200 px-3 py-1 rounded-full font-bold">
-            Target: Tomorrow (17 Sep 2026)
+            Target: Tomorrow ({tomorrowStr})
           </span>
         </div>
       </div>

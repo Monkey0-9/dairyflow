@@ -41,9 +41,11 @@ export async function executeIdempotentOperation<T>(
     try {
       const parsedResult = JSON.parse(existing.resultJson) as T;
       return { result: parsedResult, isReplay: true };
-    } catch {
-      // Return raw string if JSON parsing fails
-      return { result: existing.resultJson as unknown as T, isReplay: true };
+    } catch (parseErr) {
+      console.error('[Idempotency] Failed to parse stored result JSON for operationId:', cleanOpId, parseErr);
+      // If parsing fails, it indicates a data corruption or schema mismatch. Re-executing the operation
+      // or throwing an error might be safer than returning potentially malformed data.
+      throw new Error(`Failed to parse stored result for operation ${cleanOpId}: ${parseErr}`);
     }
   }
 

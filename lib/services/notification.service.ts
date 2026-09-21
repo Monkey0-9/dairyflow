@@ -4,6 +4,12 @@
  * Channels: In-App, Email, SMS, WhatsApp
  */
 
+import {
+  sendEmailNotification,
+  renderDairyEmailTemplate,
+  EmailSendResult,
+} from '../notifications/email-provider';
+
 export type NotificationChannel = 'IN_APP' | 'EMAIL' | 'SMS' | 'WHATSAPP';
 
 export type NotificationTriggerEvent =
@@ -40,7 +46,11 @@ export interface QueuedMessage {
 class NotificationEngine {
   private queue: QueuedMessage[] = [];
 
-  public dispatch(event: NotificationTriggerEvent, payload: NotificationPayload): QueuedMessage[] {
+  public dispatch(
+    event: NotificationTriggerEvent,
+    payload: NotificationPayload,
+    options?: { skipEmailSend?: boolean }
+  ): QueuedMessage[] {
     const messages: QueuedMessage[] = [];
     const timestamp = new Date().toISOString();
 
@@ -87,21 +97,77 @@ class NotificationEngine {
 
     // 4. Email Notification (Formal invoicing & disputes)
     if (payload.email && (event === 'invoice:generated' || event === 'payment:received' || event === 'dispute:resolved')) {
+      const subject = this.renderSubject(event, payload);
+      const text = this.renderBody(event, payload);
+      const html = renderDairyEmailTemplate({
+        title: subject,
+        recipientName: payload.recipientName,
+        body: text,
+        highlightText: payload.data?.amount ? `₹${payload.data.amount}` : undefined,
+      });
+
       messages.push({
         id: `ntf_eml_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
         channel: 'EMAIL',
         event,
         recipient: payload.email,
-        subject: this.renderSubject(event, payload),
-        body: this.renderBody(event, payload),
+        subject,
+        body: text,
         status: 'SENT',
         enqueuedAt: timestamp,
         dispatchedAt: timestamp,
       });
+
+      // Fire email transmission via configured provider (SendGrid, Resend, or Sandbox outbox)
+      if (!options?.skipEmailSend) {
+        sendEmailNotification({
+          to: payload.email,
+          subject,
+          text,
+          html,
+          tenantId: payload.tenantId,
+          metadata: payload.data,
+        }).catch((err) => {
+          console.error('[NotificationEngine] Email dispatch error:', err);
+        });
+      }
     }
 
     this.queue.push(...messages);
     return messages;
+  }
+
+  /**
+   * Synchronously await full multi-channel dispatch including real/sandbox email transmission
+   */
+  public async dispatchAsync(
+    event: NotificationTriggerEvent,
+    payload: NotificationPayload
+  ): Promise<{ messages: QueuedMessage[]; emailResult?: EmailSendResult }> {
+    const messages = this.dispatch(event, payload, { skipEmailSend: true });
+    let emailResult: EmailSendResult | undefined;
+
+    if (payload.email && (event === 'invoice:generated' || event === 'payment:received' || event === 'dispute:resolved')) {
+      const subject = this.renderSubject(event, payload);
+      const text = this.renderBody(event, payload);
+      const html = renderDairyEmailTemplate({
+        title: subject,
+        recipientName: payload.recipientName,
+        body: text,
+        highlightText: payload.data?.amount ? `₹${payload.data.amount}` : undefined,
+      });
+
+      emailResult = await sendEmailNotification({
+        to: payload.email,
+        subject,
+        text,
+        html,
+        tenantId: payload.tenantId,
+        metadata: payload.data,
+      });
+    }
+
+    return { messages, emailResult };
   }
 
   public getQueue(): QueuedMessage[] {
@@ -151,3 +217,4 @@ class NotificationEngine {
 }
 
 export const notificationEngine = new NotificationEngine();
+export const notificationService = notificationEngine;

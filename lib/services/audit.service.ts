@@ -209,8 +209,9 @@ export async function verifyAuditChain(tenantId: string): Promise<{
         entityType: b.entityType,
         entityId: b.entityId,
         action: b.action,
-        beforeState: b.beforeState || '{}',
-        afterState: b.afterState || '{}',
+        // Ensure consistent serialization for hashing: null/undefined states should be '{}' if they represent empty JSON objects.
+        beforeState: b.beforeState === null || b.beforeState === undefined ? '{}' : b.beforeState,
+        afterState: b.afterState === null || b.afterState === undefined ? '{}' : b.afterState,
         previousHash: b.previousHash,
       });
       if (recomputed !== b.currentHash) {

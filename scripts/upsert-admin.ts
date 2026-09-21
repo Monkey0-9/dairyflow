@@ -35,7 +35,7 @@ async function main() {
      ON CONFLICT (id) DO NOTHING`
   );
 
-  console.log('Successfully upserted admin and farmer accounts.');
+  console.log('Successfully upserted superadmin and farmer accounts.');
   process.exit(0);
 }
 

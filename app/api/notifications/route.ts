@@ -52,19 +52,25 @@ export async function PATCH(req: NextRequest) {
     if (!isTestMode()) {
       try {
         if (notificationId === 'ALL') {
-          if (!userId) {
-            return NextResponse.json({ success: false, error: 'userId is required to mark all as read' }, { status: 400 });
+          if (userId) {
+            await query(`UPDATE notifications SET is_read = true WHERE user_id = $1`, [userId]);
+          } else {
+            await query(`UPDATE notifications SET is_read = true`);
           }
-          await query(`UPDATE notifications SET is_read = true WHERE user_id = $1`, [userId]);
+          const store = getStore();
+          store.notifications.forEach((n) => (n.read = true));
           return NextResponse.json({ success: true, source: 'db' });
         }
+
         if (!notificationId) {
           return NextResponse.json({ success: false, error: 'notificationId is required' }, { status: 400 });
         }
-        const res = await query(`UPDATE notifications SET is_read = true WHERE id = $1 RETURNING id`, [notificationId]);
-        if (res.rows.length === 0) {
-          return NextResponse.json({ success: false, error: 'Notification not found' }, { status: 404 });
-        }
+
+        await query(`UPDATE notifications SET is_read = true WHERE id = $1`, [notificationId]);
+        const store = getStore();
+        const item = store.notifications.find((n) => n.id === notificationId);
+        if (item) item.read = true;
+
         return NextResponse.json({ success: true, source: 'db' });
       } catch (err) {
         console.error('[notifications] DB mark-read failed:', err);

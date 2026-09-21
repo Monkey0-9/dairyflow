@@ -4,8 +4,8 @@ export function vibrateLight(): void {
   if (typeof window !== 'undefined' && 'vibrate' in navigator) {
     try {
       navigator.vibrate(10);
-    } catch {
-      // Ignored if user has not interacted or device unsupported
+    } catch (err) {
+      console.debug('[Haptics] Vibrate light failed:', err);
     }
   }
 }
@@ -14,8 +14,8 @@ export function vibrateMedium(): void {
   if (typeof window !== 'undefined' && 'vibrate' in navigator) {
     try {
       navigator.vibrate(25);
-    } catch {
-      // Ignored
+    } catch (err) {
+      console.debug('[Haptics] Vibrate medium failed:', err);
     }
   }
 }
@@ -24,8 +24,8 @@ export function vibrateSuccess(): void {
   if (typeof window !== 'undefined' && 'vibrate' in navigator) {
     try {
       navigator.vibrate([15, 30, 20]);
-    } catch {
-      // Ignored
+    } catch (err) {
+      console.warn('[Haptics] Vibrate failed:', err);
     }
   }
 }
@@ -34,8 +34,8 @@ export function vibrateError(): void {
   if (typeof window !== 'undefined' && 'vibrate' in navigator) {
     try {
       navigator.vibrate([40, 40, 40]);
-    } catch {
-      // Ignored
+    } catch (err) {
+      console.warn('[Haptics] Vibrate failed:', err);
     }
   }
 }

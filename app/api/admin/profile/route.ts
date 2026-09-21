@@ -144,9 +144,9 @@ export async function PUT(req: NextRequest) {
           [
             session.userId,
             session.tenantId,
-            businessName ? businessName.trim() : 'GreenValley Dairy',
-            upiId ? upiId.trim() : 'dairy@okaxis',
-            address ? address.trim() : 'Main Dairy Route',
+            businessName ? businessName.trim() : null,
+            upiId ? upiId.trim() : null,
+            address ? address.trim() : null,
           ]
         );
       }

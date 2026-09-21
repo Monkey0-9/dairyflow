@@ -343,19 +343,26 @@ export default function CustomerRequestsManager({
                           </span>
                         </div>
                       ) : (
-                        <div className="text-xs text-slate-700">
-                          <span className="font-semibold text-slate-900">Delivery Date: </span>
-                          <span className="font-mono font-bold bg-emerald-50 text-emerald-950 px-2 py-0.5 rounded border border-emerald-200">
-                            {(req as ExtraMilkRequest).date}
-                          </span>
-                          <span className="ml-2">
-                            Quantity:{' '}
-                            <strong className="text-emerald-700">
+                        <div className="text-xs text-slate-700 flex flex-wrap items-center gap-2">
+                          <div>
+                            <span className="font-semibold text-slate-900">Delivery Date: </span>
+                            <span className="font-mono font-bold bg-emerald-50 text-emerald-950 px-2 py-0.5 rounded border border-emerald-200">
+                              {(req as ExtraMilkRequest).date}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="font-semibold text-slate-900">Quantity: </span>
+                            <strong className="text-emerald-700 font-bold">
                               {(req as ExtraMilkRequest).requestedQuantity} L
                             </strong>{' '}
-                            <span className="text-slate-500">
+                            <span className="text-slate-500 text-[11px]">
                               (Normal: {(req as ExtraMilkRequest).normalQuantity} L)
                             </span>
+                          </div>
+                          <span className="inline-flex items-center gap-1 font-bold text-[11px] bg-amber-50 text-amber-900 px-2 py-0.5 rounded-md border border-amber-200">
+                            {((req as ExtraMilkRequest).milkType || 'Cow').toUpperCase() === 'BUFFALO'
+                              ? '🐃 Buffalo Milk'
+                              : '🐄 Cow Milk (A2)'}
                           </span>
                         </div>
                       )}

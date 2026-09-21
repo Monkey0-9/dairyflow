@@ -9,6 +9,8 @@ export type MilkFlowEventType =
   | 'request:rejected'
   | 'delivery:updated'
   | 'payment:received'
+  | 'payment:submitted'
+  | 'payment:rejected'
   | 'dispute:opened'
   | 'dispute:resolved'
   | 'invoice:created';
@@ -22,6 +24,8 @@ export interface MilkFlowEvent {
   payload?: Record<string, unknown>;
   timestamp: string;
 }
+
+import { getCustomerById } from './services/customer.service';
 
 type Listener = (event: MilkFlowEvent) => void;
 

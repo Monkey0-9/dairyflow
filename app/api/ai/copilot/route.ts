@@ -22,7 +22,9 @@ async function maybeEnhance(
   try {
     const polished = await groundedAnswer(question, facts, lang);
     if (polished) return { answer: polished, source: 'llm' };
-  } catch { /* fall through to rules */ }
+  } catch (err) {
+    console.warn('[ai/copilot] LLM enhancement failed, falling back to rules:', err);
+  }
   return { answer: ruleAnswer, source: 'rules' };
 }
 
@@ -84,7 +86,9 @@ export async function POST(req: NextRequest) {
             breakdown[key] = (breakdown[key] || 0) + r.scheduledQuantity;
             total += r.scheduledQuantity;
           }
-        } catch { /* fallback below */ }
+        } catch (err) {
+          console.error('[ai/copilot] DB ledger range query failed:', err);
+        }
       }
       if (total === 0) {
         // Store fallback: sum active subscription quantities
@@ -139,7 +143,9 @@ export async function POST(req: NextRequest) {
               }
             }
           }
-        } catch { /* fallback */ }
+        } catch (err) {
+          console.error('[ai/copilot] DB invoices query failed:', err);
+        }
       }
       if (overdue.length === 0) {
         for (const inv of store.invoices) {
@@ -184,7 +190,9 @@ export async function POST(req: NextRequest) {
           for (const r of rows) {
             if (r.status === 'SKIPPED') counts[r.customerId] = (counts[r.customerId] || 0) + 1;
           }
-        } catch { /* fallback */ }
+        } catch (err) {
+          console.error('[ai/copilot] DB chronic skips ledger query failed:', err);
+        }
       }
       if (Object.keys(counts).length === 0) {
         for (const r of store.deliveryRecords.values()) {
@@ -203,7 +211,9 @@ export async function POST(req: NextRequest) {
           const res = await query(`SELECT c.id, u.name FROM customer_profiles c JOIN users u ON c.user_id = u.id WHERE c.farmer_id = $1`, [farmerId]);
           const nameMap = new Map<string, string>(res.rows.map((r) => [(r as { id: string; name: string }).id, (r as { id: string; name: string }).name]));
           for (const c of chronic) c.customerName = nameMap.get(c.customerId) || c.customerId;
-        } catch { /* keep ids */ }
+        } catch (err) {
+          console.error('[ai/copilot] DB customer names lookup failed:', err);
+        }
       }
       const ruleAnswer = chronic.length === 0
         ? `No customers skipped ${threshold} or more deliveries this month.`

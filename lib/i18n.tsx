@@ -254,8 +254,8 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
         if (saved && I18N_LANGS.includes(saved)) {
           return saved;
         }
-      } catch {
-        // localStorage may be disabled
+      } catch (err) {
+        console.error('[i18n] Failed to read language from localStorage, falling back to default:', err);
       }
     }
     return 'en';
@@ -272,8 +272,8 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
     try {
       localStorage.setItem(STORAGE_KEY, l);
       document.documentElement.lang = l;
-    } catch {
-      // ignore
+    } catch (err) {
+      console.error('[i18n] Failed to save language to localStorage, preference may not persist:', err);
     }
   }, []);
 

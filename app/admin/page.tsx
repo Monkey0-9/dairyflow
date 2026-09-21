@@ -186,16 +186,35 @@ export default function AdminPage() {
       bottlesReturned?: number;
     }
   ) => {
-    return runSave(() =>
-      apiMutate('/api/ledger', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          recordId,
-          ...updates,
-        }),
-      })
-    );
+    return runSave(async () => {
+      try {
+        return await apiMutate('/api/ledger', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            recordId,
+            ...updates,
+          }),
+        });
+      } catch (err: unknown) {
+        // FR-DEL-009: When day closing is finalized (HTTP 423), route to explicit delivery-corrections workflow
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes('FINALIZED') || (typeof err === 'object' && err !== null && 'status' in err && (err as { status: number }).status === 423)) {
+          const reasonText = updates.reason || updates.notes || 'Administrative ledger correction post day closing';
+          return await apiMutate('/api/delivery-corrections', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              deliveryRecordId: recordId,
+              correctedQuantity: updates.deliveredQuantity,
+              correctedStatus: updates.status,
+              reason: reasonText.length >= 5 ? reasonText : 'Administrative ledger correction post day closing',
+            }),
+          });
+        }
+        throw err;
+      }
+    });
   };
 
   // Add customer
@@ -326,44 +345,21 @@ export default function AdminPage() {
 
   // Mark notification read
   const handleMarkNotificationRead = async (id: string) => {
+    // Optimistic update: instantly clears unread highlight and badge count in UI
+    setNotifications((prev) =>
+      prev.map((n) => (id === 'ALL' || n.id === id ? { ...n, read: true } : n))
+    );
+
     try {
       await apiMutate('/api/notifications', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ notificationId: id }),
+        body: JSON.stringify({ notificationId: id, userId: 'user_farmer' }),
       });
       setSaveError(null);
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : 'Failed to update notification.');
+      console.warn('Failed to persist notification read state to server:', err);
     }
-    await loadAdminData();
-  };
-
-  // Persona switcher handler — dev/test only. Production rejects demoUserId (403).
-  const handlePersonaChange = async (_role: string, userId: string) => {
-    if (process.env.NODE_ENV === 'production' && process.env.NEXT_PUBLIC_DEMO_MODE !== 'true') {
-      setSaveError('Persona switching is disabled in production. Please sign in with real credentials.');
-      return;
-    }
-    try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ demoUserId: userId }),
-      });
-      const data = await res.json().catch(() => null);
-      if (!res.ok || (data && data.success === false)) {
-        throw new Error(data?.error || `Persona switch failed (${res.status}).`);
-      }
-      setSaveError(null);
-    } catch (err) {
-      setSaveError(err instanceof Error ? err.message : 'Persona switch failed.');
-      return;
-    }
-    if (userId === 'user_admin') router.push('/superadmin');
-    else if (userId.startsWith('user_')) router.push('/customer');
-    else router.push('/admin');
-    router.refresh();
   };
 
   const handleLogout = async () => {
@@ -443,7 +439,6 @@ export default function AdminPage() {
         currentUserId="user_farmer"
         selectedDate={selectedDate}
         onDateChange={setSelectedDate}
-        onPersonaChange={handlePersonaChange}
         activeTab={activeTab}
         onTabChange={setActiveTab}
         notifications={notifications}
@@ -454,19 +449,19 @@ export default function AdminPage() {
 
       {/* Main Workspace */}
       <main id="main-content" className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
-        {/* Dynamic Admin Operational Header */}
-        <div className="bg-linear-to-r from-slate-900 via-slate-800 to-emerald-950 text-white p-6 rounded-3xl shadow-xl space-y-5">
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-white/10 pb-4">
+        {/* Dynamic Admin Operational Header - Clean White Enterprise Design */}
+        <div className="bg-white text-slate-900 p-6 rounded-3xl border border-slate-200 shadow-xs space-y-5">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-100 pb-4">
             <div>
               <div className="flex items-center gap-2 mb-1">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
-                <span className="text-[11px] font-mono uppercase tracking-widest text-emerald-400 font-bold">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="text-[11px] font-mono uppercase tracking-widest text-emerald-700 font-bold">
                   Operational Control Room • Real-Time Database State
                 </span>
               </div>
-              <h1 className="text-2xl font-black tracking-tight flex items-center gap-2">
-                <span>MilkFlow Private Reserve</span>
-                <span className="text-xs bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 px-2.5 py-0.5 rounded-full font-bold">
+              <h1 className="text-2xl font-black tracking-tight text-slate-900 flex items-center gap-2">
+                <span>MilkFlow Dairy Operations</span>
+                <span className="text-xs bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-0.5 rounded-full font-bold">
                   {selectedDate === new Date().toISOString().split('T')[0] ? `Today (${new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })})` : selectedDate}
                 </span>
               </h1>
@@ -475,7 +470,7 @@ export default function AdminPage() {
             <div className="flex items-center gap-2">
               <Link
                 href="/admin/profile"
-                className="px-3 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-xs font-bold flex items-center gap-1.5 transition border border-emerald-500/30 cursor-pointer"
+                className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold flex items-center gap-1.5 transition border border-slate-200 cursor-pointer"
                 title="Admin & Farmer Profile"
               >
                 <User className="w-3.5 h-3.5" />
@@ -483,7 +478,7 @@ export default function AdminPage() {
               </Link>
               <button
                 onClick={loadAdminData}
-                className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+                className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold flex items-center gap-1.5 transition border border-slate-200 cursor-pointer"
                 title="Refresh from Database"
               >
                 <RefreshCw className="w-3.5 h-3.5" />
@@ -491,7 +486,7 @@ export default function AdminPage() {
               </button>
               <button
                 onClick={handleLogout}
-                className="px-3 py-1.5 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 text-xs font-bold flex items-center gap-1.5 transition border border-rose-500/30 cursor-pointer"
+                className="px-3 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold flex items-center gap-1.5 transition border border-rose-200 cursor-pointer"
                 title="Logout"
               >
                 <LogOut className="w-3.5 h-3.5" />
@@ -502,68 +497,68 @@ export default function AdminPage() {
 
           {/* Real Metrics Grid */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 text-xs">
-            <div className="p-3.5 rounded-2xl bg-white/5 border border-white/10">
-              <span className="text-[10px] uppercase font-bold text-slate-400">Total Customers</span>
-              <div className="text-xl font-black font-mono mt-1 text-white">{stats.totalCustomers}</div>
-              <span className="text-[10px] text-emerald-400 mt-0.5 block font-semibold">Active Daily Subscribers</span>
+            <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200">
+              <span className="text-[10px] uppercase font-bold text-slate-500">Total Customers</span>
+              <div className="text-xl font-black font-mono mt-1 text-slate-900">{stats.totalCustomers}</div>
+              <span className="text-[10px] text-emerald-600 mt-0.5 block font-semibold">Active Daily Subscribers</span>
             </div>
 
-            <div className="p-3.5 rounded-2xl bg-white/5 border border-white/10">
-              <span className="text-[10px] uppercase font-bold text-slate-400">Expected Milk</span>
-              <div className="text-xl font-black font-mono mt-1 text-slate-200">
-                {stats.expectedLitres} <span className="text-xs font-normal text-slate-400">L</span>
+            <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200">
+              <span className="text-[10px] uppercase font-bold text-slate-500">Expected Milk</span>
+              <div className="text-xl font-black font-mono mt-1 text-slate-900">
+                {stats.expectedLitres} <span className="text-xs font-normal text-slate-500">L</span>
               </div>
-              <span className="text-[10px] text-slate-400 mt-0.5 block">Scheduled Demand</span>
+              <span className="text-[10px] text-slate-500 mt-0.5 block">Scheduled Demand</span>
             </div>
 
-            <div className="p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/30">
-              <span className="text-[10px] uppercase font-bold text-emerald-300">Delivered Milk</span>
-              <div className="text-xl font-black font-mono mt-1 text-emerald-300">
-                {stats.deliveredLitres} <span className="text-xs font-normal text-emerald-400">L</span>
+            <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200">
+              <span className="text-[10px] uppercase font-bold text-emerald-800">Delivered Milk</span>
+              <div className="text-xl font-black font-mono mt-1 text-emerald-700">
+                {stats.deliveredLitres} <span className="text-xs font-normal text-emerald-600">L</span>
               </div>
-              <span className="text-[10px] text-emerald-400 mt-0.5 block">Actual Dropped</span>
+              <span className="text-[10px] text-emerald-700 mt-0.5 block">Actual Dropped</span>
             </div>
 
-            <div className="p-3.5 rounded-2xl bg-white/5 border border-white/10">
-              <span className="text-[10px] uppercase font-bold text-slate-400">Billable Milk</span>
-              <div className="text-xl font-black font-mono mt-1 text-emerald-400">
-                {stats.billableLitres} <span className="text-xs font-normal text-slate-400">L</span>
+            <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200">
+              <span className="text-[10px] uppercase font-bold text-slate-500">Billable Milk</span>
+              <div className="text-xl font-black font-mono mt-1 text-slate-900">
+                {stats.billableLitres} <span className="text-xs font-normal text-slate-500">L</span>
               </div>
-              <span className="text-[10px] text-slate-400 mt-0.5 block">Server Calculated</span>
+              <span className="text-[10px] text-slate-500 mt-0.5 block">Server Calculated</span>
             </div>
 
-            <div className="p-3.5 rounded-2xl bg-white/5 border border-white/10">
-              <span className="text-[10px] uppercase font-bold text-slate-400">Today Revenue</span>
-              <div className="text-xl font-black font-mono mt-1 text-white">
+            <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200">
+              <span className="text-[10px] uppercase font-bold text-slate-500">Today Revenue</span>
+              <div className="text-xl font-black font-mono mt-1 text-slate-900">
                 ₹{stats.todayRevenue}
               </div>
-              <span className="text-[10px] text-slate-400 mt-0.5 block">Delivered Worth</span>
+              <span className="text-[10px] text-slate-500 mt-0.5 block">Delivered Worth</span>
             </div>
 
-            <div className="p-3.5 rounded-2xl bg-white/5 border border-white/10">
-              <span className="text-[10px] uppercase font-bold text-slate-400">Today Collected</span>
-              <div className="text-xl font-black font-mono mt-1 text-emerald-400">
+            <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200">
+              <span className="text-[10px] uppercase font-bold text-slate-500">Today Collected</span>
+              <div className="text-xl font-black font-mono mt-1 text-emerald-700">
                 ₹{stats.todayCollected}
               </div>
-              <span className="text-[10px] text-emerald-400 mt-0.5 block">Payments Logged</span>
+              <span className="text-[10px] text-emerald-600 mt-0.5 block font-semibold">Payments Logged</span>
             </div>
           </div>
 
           {/* Product Breakdown Banner */}
-          <div className="flex flex-wrap items-center justify-between gap-3 text-xs bg-black/20 p-3 rounded-2xl border border-white/5">
-            <div className="flex items-center gap-3 font-semibold">
-              <span className="text-slate-400">Product Consumption:</span>
-              <span className="text-emerald-300">Cow: <strong>{stats.productBreakdown.cow} L</strong></span>
+          <div className="flex flex-wrap items-center justify-between gap-3 text-xs bg-slate-50 p-3 rounded-2xl border border-slate-200">
+            <div className="flex items-center gap-3 font-semibold text-slate-700">
+              <span className="text-slate-500">Product Consumption:</span>
+              <span className="text-emerald-700">Cow: <strong>{stats.productBreakdown.cow} L</strong></span>
               <span>•</span>
-              <span className="text-blue-300">Buffalo: <strong>{stats.productBreakdown.buffalo} L</strong></span>
+              <span className="text-blue-700">Buffalo: <strong>{stats.productBreakdown.buffalo} L</strong></span>
               <span>•</span>
-              <span className="text-purple-300">Desi A2: <strong>{stats.productBreakdown.a2} L</strong></span>
+              <span className="text-purple-700">Desi A2: <strong>{stats.productBreakdown.a2} L</strong></span>
             </div>
 
             {monthToDate && (
-              <div className="text-slate-400 text-[11px] font-mono">
-                Sep MTD Total: <strong className="text-white">{monthToDate.deliveredLitres} L</strong> | Revenue:{' '}
-                <strong className="text-emerald-400">₹{monthToDate.revenue}</strong>
+              <div className="text-slate-500 text-[11px] font-mono">
+                Sep MTD Total: <strong className="text-slate-900">{monthToDate.deliveredLitres} L</strong> | Revenue:{' '}
+                <strong className="text-emerald-700 font-bold">₹{monthToDate.revenue}</strong>
               </div>
             )}
           </div>
@@ -714,11 +709,15 @@ export default function AdminPage() {
             {activeTab === 'calendar' && (
               <MonthlyLedgerCalendar
                 customers={customers}
+                products={products}
+                pauseRequests={pauseRequests}
+                extraRequests={extraRequests}
                 onSelectDate={(d) => {
                   setSelectedDate(d);
                   setActiveTab('daily');
                 }}
                 onUpdateRecord={handleUpdateRecord}
+                onRefresh={loadAdminData}
               />
             )}
 
@@ -726,6 +725,7 @@ export default function AdminPage() {
               <CustomerManagement
                 customers={customers}
                 products={products}
+                invoices={invoices}
                 onAddCustomer={handleAddCustomer}
                 onDeleteCustomer={handleDeleteCustomer}
                 onRefresh={loadAdminData}
@@ -925,89 +925,89 @@ export default function AdminPage() {
               </div>
             </div>
 
-            {/* Quick Farmer Shortcuts - Obsidian Enterprise Command Dock */}
-            <div className="bg-gradient-to-b from-slate-900 via-slate-900 to-slate-950 text-white p-4.5 rounded-2xl border border-slate-800/80 shadow-md space-y-3">
-              <div className="flex items-center justify-between border-b border-slate-800/70 pb-2.5">
+            {/* Quick Farmer Shortcuts - Clean White Enterprise Design */}
+            <div className="bg-white text-slate-900 p-4.5 rounded-2xl border border-slate-200 shadow-xs space-y-3">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
                 <div className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                  <h4 className="text-[11px] font-mono font-bold uppercase tracking-wider text-emerald-400">
-                    Farmer Shortcuts
+                  <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                  <h4 className="text-[11px] font-mono font-bold uppercase tracking-wider text-slate-700">
+                    Farmer Quick Actions
                   </h4>
                 </div>
-                <span className="text-[10px] font-mono text-slate-400 bg-slate-800/80 px-2 py-0.5 rounded-md border border-slate-700/60">
-                  Command Dock
+                <span className="text-[10px] font-mono text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200">
+                  Shortcuts
                 </span>
               </div>
 
               <div className="space-y-1.5 text-xs">
                 <button
                   onClick={() => setActiveTab('daily')}
-                  className="w-full text-left p-2.5 rounded-xl bg-slate-800/40 hover:bg-slate-800/90 hover:border-slate-700 border border-slate-800/60 transition flex items-center justify-between group cursor-pointer"
+                  className="w-full text-left p-2.5 rounded-xl bg-slate-50 hover:bg-slate-100/80 border border-slate-200 transition flex items-center justify-between group cursor-pointer"
                 >
                   <div className="flex items-center gap-2.5 min-w-0">
-                    <div className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 group-hover:bg-emerald-500/20 transition shrink-0">
+                    <div className="p-1.5 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0">
                       <Truck className="w-3.5 h-3.5" />
                     </div>
                     <div className="min-w-0">
-                      <div className="font-semibold text-slate-200 group-hover:text-white text-xs truncate">Start Morning Run</div>
-                      <div className="text-[10px] text-slate-400 truncate">Daily delivery checklist</div>
+                      <div className="font-semibold text-slate-900 text-xs truncate">Daily Delivery Run</div>
+                      <div className="text-[10px] text-slate-500 truncate">Delivery checklist &amp; mark drops</div>
                     </div>
                   </div>
-                  <kbd className="font-mono text-[10px] text-slate-400 group-hover:text-slate-200 bg-slate-900/80 px-1.5 py-0.5 rounded border border-slate-800 shrink-0 ml-2">
+                  <kbd className="font-mono text-[10px] text-slate-500 bg-white px-1.5 py-0.5 rounded border border-slate-200 shrink-0 ml-2">
                     ⌥1
                   </kbd>
                 </button>
 
                 <button
-                  onClick={() => setActiveTab('inventory')}
-                  className="w-full text-left p-2.5 rounded-xl bg-slate-800/40 hover:bg-slate-800/90 hover:border-slate-700 border border-slate-800/60 transition flex items-center justify-between group cursor-pointer"
+                  onClick={() => setActiveTab('calendar')}
+                  className="w-full text-left p-2.5 rounded-xl bg-slate-50 hover:bg-slate-100/80 border border-slate-200 transition flex items-center justify-between group cursor-pointer"
                 >
                   <div className="flex items-center gap-2.5 min-w-0">
-                    <div className="p-1.5 rounded-lg bg-teal-500/10 text-teal-400 border border-teal-500/20 group-hover:bg-teal-500/20 transition shrink-0">
-                      <Layers className="w-3.5 h-3.5" />
+                    <div className="p-1.5 rounded-lg bg-teal-50 text-teal-700 border border-teal-200 shrink-0">
+                      <Calendar className="w-3.5 h-3.5" />
                     </div>
                     <div className="min-w-0">
-                      <div className="font-semibold text-slate-200 group-hover:text-white text-xs truncate">Close & Reconcile</div>
-                      <div className="text-[10px] text-slate-400 truncate">Silo balance verification</div>
+                      <div className="font-semibold text-slate-900 text-xs truncate">Delivery Calendar</div>
+                      <div className="text-[10px] text-slate-500 truncate">Who receives what quantity</div>
                     </div>
                   </div>
-                  <kbd className="font-mono text-[10px] text-slate-400 group-hover:text-slate-200 bg-slate-900/80 px-1.5 py-0.5 rounded border border-slate-800 shrink-0 ml-2">
+                  <kbd className="font-mono text-[10px] text-slate-500 bg-white px-1.5 py-0.5 rounded border border-slate-200 shrink-0 ml-2">
                     ⌥2
                   </kbd>
                 </button>
 
                 <button
                   onClick={() => setActiveTab('billing')}
-                  className="w-full text-left p-2.5 rounded-xl bg-slate-800/40 hover:bg-slate-800/90 hover:border-slate-700 border border-slate-800/60 transition flex items-center justify-between group cursor-pointer"
+                  className="w-full text-left p-2.5 rounded-xl bg-slate-50 hover:bg-slate-100/80 border border-slate-200 transition flex items-center justify-between group cursor-pointer"
                 >
                   <div className="flex items-center gap-2.5 min-w-0">
-                    <div className="p-1.5 rounded-lg bg-blue-500/10 text-blue-400 border border-blue-500/20 group-hover:bg-blue-500/20 transition shrink-0">
+                    <div className="p-1.5 rounded-lg bg-blue-50 text-blue-700 border border-blue-200 shrink-0">
                       <FileText className="w-3.5 h-3.5" />
                     </div>
                     <div className="min-w-0">
-                      <div className="font-semibold text-slate-200 group-hover:text-white text-xs truncate">Monthly Invoices</div>
-                      <div className="text-[10px] text-slate-400 truncate">Automated billing ledger</div>
+                      <div className="font-semibold text-slate-900 text-xs truncate">Monthly Invoices</div>
+                      <div className="text-[10px] text-slate-500 truncate">Automated billing ledger</div>
                     </div>
                   </div>
-                  <kbd className="font-mono text-[10px] text-slate-400 group-hover:text-slate-200 bg-slate-900/80 px-1.5 py-0.5 rounded border border-slate-800 shrink-0 ml-2">
+                  <kbd className="font-mono text-[10px] text-slate-500 bg-white px-1.5 py-0.5 rounded border border-slate-200 shrink-0 ml-2">
                     ⌥3
                   </kbd>
                 </button>
 
                 <button
                   onClick={() => setActiveTab('audit')}
-                  className="w-full text-left p-2.5 rounded-xl bg-slate-800/40 hover:bg-slate-800/90 hover:border-slate-700 border border-slate-800/60 transition flex items-center justify-between group cursor-pointer"
+                  className="w-full text-left p-2.5 rounded-xl bg-slate-50 hover:bg-slate-100/80 border border-slate-200 transition flex items-center justify-between group cursor-pointer"
                 >
                   <div className="flex items-center gap-2.5 min-w-0">
-                    <div className="p-1.5 rounded-lg bg-purple-500/10 text-purple-400 border border-purple-500/20 group-hover:bg-purple-500/20 transition shrink-0">
+                    <div className="p-1.5 rounded-lg bg-purple-50 text-purple-700 border border-purple-200 shrink-0">
                       <Sparkles className="w-3.5 h-3.5" />
                     </div>
                     <div className="min-w-0">
-                      <div className="font-semibold text-slate-200 group-hover:text-white text-xs truncate">Cryptographic Audit</div>
-                      <div className="text-[10px] text-slate-400 truncate">SHA-256 tamper-proof log</div>
+                      <div className="font-semibold text-slate-900 text-xs truncate">Cryptographic Audit</div>
+                      <div className="text-[10px] text-slate-500 truncate">SHA-256 tamper-proof log</div>
                     </div>
                   </div>
-                  <kbd className="font-mono text-[10px] text-slate-400 group-hover:text-slate-200 bg-slate-900/80 px-1.5 py-0.5 rounded border border-slate-800 shrink-0 ml-2">
+                  <kbd className="font-mono text-[10px] text-slate-500 bg-white px-1.5 py-0.5 rounded border border-slate-200 shrink-0 ml-2">
                     ⌥4
                   </kbd>
                 </button>
@@ -1033,10 +1033,11 @@ export default function AdminPage() {
 
       {/* Mobile Bottom Navigation for 1-Thumb Field Use */}
       <BottomNav
-        activeId={['daily', 'customers', 'billing', 'requests'].includes(activeTab) ? activeTab : 'more'}
+        activeId={['daily', 'calendar', 'customers', 'billing', 'requests'].includes(activeTab) ? activeTab : 'more'}
         onChange={(id) => setActiveTab(id)}
         items={[
           { id: 'daily', label: 'Daily Run', icon: <Truck className="w-5 h-5" /> },
+          { id: 'calendar', label: 'Calendar', icon: <Calendar className="w-5 h-5" /> },
           { id: 'customers', label: 'Clients', icon: <UserCheck className="w-5 h-5" /> },
           { id: 'billing', label: 'Bills', icon: <FileText className="w-5 h-5" /> },
           { id: 'requests', label: 'Requests', icon: <Clock className="w-5 h-5" />, badge: totalPendingRequests },

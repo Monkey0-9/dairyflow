@@ -33,7 +33,7 @@ export function verifyRazorpayPaymentSignature(params: {
   signature: string;
   keySecret?: string;
 }): boolean {
-  const secret = params.keySecret ?? process.env.RAZORPAY_KEY_SECRET;
+  const secret = params.keySecret || process.env.RAZORPAY_KEY_SECRET;
   if (!secret || !params.orderId || !params.paymentId || !params.signature) return false;
   try {
     const expected = crypto
@@ -95,11 +95,9 @@ export async function processPayment(params: ProcessPaymentParams): Promise<Paym
     }
 
     const invoice = invRes.rows[0];
-    const outstanding = Number(invoice.totalAmount) - Number(invoice.paidAmount);
     // FR-PAY-006: partial payments allowed; overpayments are clamped to zero
     // outstanding (no negative balances) until an explicit credit-balance
     // model is introduced. Amount was already validated positive above.
-    void outstanding;
     const newPaidAmount = invoice.paidAmount + params.amount;
     const newOutstanding = Math.max(0, invoice.totalAmount - newPaidAmount);
     const newStatus = newOutstanding <= 0 ? 'PAID' : 'PARTIALLY_PAID';

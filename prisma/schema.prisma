@@ -51,7 +51,7 @@ model User {
   name         String
   passwordHash String
   passwordSalt String
-  role         String   @default("CUSTOMER") // 'FARMER' | 'CUSTOMER' | 'SUPERADMIN'
+  role         String   @default("CUSTOMER") // Canonical roles: 'FARMER' (dairy admin) | 'CUSTOMER' (client) | 'SUPERADMIN' (platform owner). 'ADMIN' is accepted as an alias of 'SUPERADMIN' by the auth layer.
   isActive     Boolean  @default(true)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt

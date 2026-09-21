@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll } from 'vitest';
+import { LIVE_DB_TESTS_ENABLED } from '../setup';
 import { NextRequest } from 'next/server';
 import { encodeSignedSession, decodeSignedSession, hashPassword, verifyPassword, SessionUser } from '@/lib/auth';
 import { authenticateRequest, enforceCustomerOwnership, enforceTenantAccess } from '@/lib/api-auth';
@@ -6,7 +7,7 @@ import { processPayment } from '@/lib/services/payment.service';
 import { getCustomersByFarmer } from '@/lib/services/customer.service';
 import { query } from '@/lib/db';
 
-describe('Phase 5 & Security: Multi-Tenant Isolation & Authorization Attacks', () => {
+describe.skipIf(!LIVE_DB_TESTS_ENABLED)('Phase 5 & Security: Multi-Tenant Isolation & Authorization Attacks', () => {
   beforeAll(async () => {
     try {
       await query(`

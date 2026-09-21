@@ -42,19 +42,33 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Access denied: Customer belongs to another tenant.' }, { status: 403 });
     }
 
-    const transferRes = await query<{ id: string }>(
-      `INSERT INTO customer_transfer_requests (id, customer_id, from_farmer_id, to_farmer_id, status, reason, effective_date, created_at)
-       VALUES (gen_random_uuid(), $1, $2, $3, 'PENDING', $4, $5, NOW())
-       RETURNING id`,
-      [customer.id, customer.farmerId, toFarmerId, reason || null, effectiveDate || new Date().toISOString()]
-    ).catch(() => ({ rows: [{ id: `tr_${Date.now()}` }] }));
+    let transferRes: { rows: { id: string }[] };
+    try {
+      transferRes = await query<{ id: string }>(
+        `INSERT INTO customer_transfer_requests (id, customer_id, from_farmer_id, to_farmer_id, status, reason, effective_date, created_at)
+         VALUES (gen_random_uuid(), $1, $2, $3, 'PENDING', $4, $5, NOW())
+         RETURNING id`,
+        [customer.id, customer.farmerId, toFarmerId, reason || null, effectiveDate || new Date().toISOString()]
+      );
+    } catch (dbErr) {
+      if (isTestMode()) {
+        console.warn('[customer/transfer] DB unavailable in test mode, using memory fallback:', dbErr);
+        transferRes = { rows: [{ id: `tr_${Date.now()}` }] };
+      } else {
+        console.error('[customer/transfer] Failed to insert customer_transfer_requests:', dbErr);
+        throw dbErr;
+      }
+    }
 
     try {
       await query(
         `UPDATE customer_profiles SET transfer_status = 'REQUESTED', updated_at = NOW() WHERE id = $1`,
         [customer.id]
       );
-    } catch { /* best effort */ }
+    } catch (updErr) {
+      console.error('[customer/transfer] Failed to update customer transfer_status:', updErr);
+      if (!isTestMode()) throw updErr;
+    }
 
     const newTransferId = transferRes.rows[0].id;
 

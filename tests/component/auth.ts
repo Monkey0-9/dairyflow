@@ -52,6 +52,6 @@ describe('Component Testing: Authentication & Session Token Handler', () => {
   it('should contain valid preset demo users for all primary personas', () => {
     expect(PRESET_DEMO_USERS.user_farmer.role).toBe('FARMER');
     expect(PRESET_DEMO_USERS.user_ravi.role).toBe('CUSTOMER');
-    expect(PRESET_DEMO_USERS.user_admin.role).toBe('ADMIN');
+    expect(PRESET_DEMO_USERS.user_admin.role).toBe('SUPERADMIN');
   });
 });

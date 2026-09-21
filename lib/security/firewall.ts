@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { checkRateLimit } from './rate-limiter';
+import { checkRateLimit, clearAllRateLimits } from './rate-limiter';
 import { query } from '../db';
+
+// Clear any stale rate-limit buckets on development reloads
+if (process.env.NODE_ENV !== 'production') {
+  clearAllRateLimits();
+}
 
 /**
  * Enterprise Application Security Firewall (WAF) & Defense-in-Depth Inspection.
@@ -9,6 +14,8 @@ import { query } from '../db';
 
 // Common high-risk malicious patterns in web request parameters or headers
 const MALICIOUS_PATTERNS = [
+  // WARNING: Regex-based input validation is not a complete defense against SQLi/XSS.
+  // Always use parameterized queries for SQL and proper output encoding for HTML.
   /(\b(SELECT|INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|EXEC|EXECUTE)\b\s+.*\b(FROM|INTO|TABLE|DATABASE)\b)/i,
   /--\s*$/m,
   /\bOR\s+1\s*=\s*1\b/i,
@@ -31,26 +38,34 @@ export function inspectRequestSecurity(req: NextRequest): FirewallCheckResult {
   const ip = req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || 'anonymous_ip';
   const pathname = req.nextUrl.pathname;
 
-  // 1. Endpoint Rate Limiting Throttling
+  // 1. Endpoint Rate Limiting Throttling (only applies to API routes)
+  const isApiRoute = pathname.startsWith('/api/');
   const isLoopback = ip === '127.0.0.1' || ip === '::1' || ip === 'localhost' || ip === 'anonymous_ip';
   const isDevOrTest = process.env.NODE_ENV !== 'production' || process.env.PLAYWRIGHT === 'true' || process.env.VITEST === 'true';
 
-  let maxReqs = 120;
-  if (pathname.includes('/auth/login') || pathname.includes('/auth/activate-customer')) {
-    maxReqs = isLoopback || isDevOrTest ? 300 : 30; // Generous for local development/testing, secure for external public IP
-  }
+  if (isApiRoute) {
+    // Ultra-generous limit (10,000 reqs/min) for local development/loopback, strict for public IPs
+    let maxReqs = isLoopback || isDevOrTest ? 10000 : 300;
+    if (pathname.includes('/auth/login') || pathname.includes('/auth/activate-customer')) {
+      if (process.env.NODE_ENV === 'production') {
+        maxReqs = isLoopback ? 2000 : 30;
+      } else {
+        maxReqs = isLoopback || isDevOrTest ? 2000 : 30;
+      }
+    }
 
-  const rateCheck = checkRateLimit(`waf_${ip}_${pathname}`, maxReqs, 60);
-  if (!rateCheck.allowed) {
-    logSuspiciousEvent(ip, pathname, 'RATE_LIMIT_EXCEEDED', `Exceeded limit of ${maxReqs} requests/min`);
-    return {
-      blocked: true,
-      reason: 'Rate limit exceeded',
-      response: NextResponse.json(
-        { success: false, error: 'Security Firewall: Request rate limit exceeded. Please try again later.' },
-        { status: 429, headers: { 'Retry-After': String(rateCheck.resetTimeSeconds) } }
-      ),
-    };
+    const rateCheck = checkRateLimit(`waf_${ip}_${pathname}`, maxReqs, 60);
+    if (!rateCheck.allowed) {
+      logSuspiciousEvent(ip, pathname, 'RATE_LIMIT_EXCEEDED', `Exceeded limit of ${maxReqs} requests/min`);
+      return {
+        blocked: true,
+        reason: 'Rate limit exceeded',
+        response: NextResponse.json(
+          { success: false, error: 'Security Firewall: Request rate limit exceeded. Please try again later.' },
+          { status: 429, headers: { 'Retry-After': String(rateCheck.resetTimeSeconds) } }
+        ),
+      };
+    }
   }
 
   // 2. Query String Payload Inspection

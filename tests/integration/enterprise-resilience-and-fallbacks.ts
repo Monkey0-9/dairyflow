@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll } from 'vitest';
+import { LIVE_DB_TESTS_ENABLED } from '../setup';
 import { NextRequest } from 'next/server';
 import { POST as registerPost } from '@/app/api/auth/register/route';
 import { POST as customersPost, GET as customersGet } from '@/app/api/customers/route';
@@ -12,7 +13,7 @@ import { cachedQuery } from '@/lib/redis/cache';
 import { acquireDistributedLock } from '@/lib/redis/lock';
 import { query } from '@/lib/db';
 
-describe('Enterprise Resilience, Authentication Matrix & Zero Fake Data Audit', () => {
+describe.skipIf(!LIVE_DB_TESTS_ENABLED)('Enterprise Resilience, Authentication Matrix & Zero Fake Data Audit', () => {
   const farmerSession = encodeSignedSession({
     userId: 'user_farmer_audit',
     name: 'Suresh Patel (Farmer)',

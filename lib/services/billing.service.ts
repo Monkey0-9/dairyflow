@@ -18,6 +18,13 @@ export interface DbInvoice {
   generatedAt: string;
   customerName?: string;
   customerPhone?: string;
+  customerAddress?: string;
+  invoiceNumber?: string;
+  monthName?: string;
+  items?: Array<{ id: string; productId: string; productName: string; totalQuantity: number; pricePerUnit: number; amount: number }>;
+  subtotal?: number;
+  extraCharges?: number;
+  creditsOrAdjustments?: number;
 }
 
 export async function getInvoices(params: {
@@ -36,7 +43,8 @@ export async function getInvoices(params: {
              i.paid_amount::float as "paidAmount",
              i.outstanding_amount::float as "outstandingAmount",
              i.status, NULL::text as notes, i.due_date as "dueDate", i.created_at as "generatedAt",
-             u.name as "customerName", u.phone as "customerPhone"
+              u.name as "customerName", u.phone as "customerPhone",
+              c.delivery_address as "customerAddress"
       FROM invoices i
       JOIN customer_profiles c ON i.customer_id = c.id
       JOIN users u ON c.user_id = u.id
@@ -66,7 +74,38 @@ export async function getInvoices(params: {
     sql += ` ORDER BY i.year DESC, i.month DESC, u.name ASC`;
 
     const res = await query<DbInvoice>(sql, queryParams);
-    return res.rows;
+    if (res.rows.length === 0) return res.rows;
+    // Shape DB invoices into the Invoice contract viewers expect: line items
+    // from invoice_items plus coherent summary fields. Missing items yield an
+    // empty array (never undefined) so .map() rendering cannot crash.
+    const ids = res.rows.map((r) => r.id);
+    const itemsRes = await query(
+      `SELECT invoice_id as "invoiceId", id, description,
+              quantity::float as "totalQuantity", rate::float as "pricePerUnit",
+              amount::float as "amount"
+       FROM invoice_items WHERE invoice_id = ANY($1) ORDER BY date ASC`,
+      [ids]
+    );
+    const itemsByInvoice = new Map<string, DbInvoice['items']>();
+    for (const it of itemsRes.rows as Array<{ invoiceId: string; id: string; description: string; totalQuantity: number; pricePerUnit: number; amount: number }>) {
+      const list = itemsByInvoice.get(it.invoiceId) || [];
+      list.push({ id: it.id, productId: '', productName: it.description || 'Milk', totalQuantity: it.totalQuantity || 0, pricePerUnit: it.pricePerUnit || 0, amount: it.amount || 0 });
+      itemsByInvoice.set(it.invoiceId, list);
+    }
+    const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+    return res.rows.map((r) => {
+      const items = itemsByInvoice.get(r.id) || [];
+      const subtotal = parseFloat(items.reduce((s, i) => s + (i.amount || 0), 0).toFixed(2));
+      return {
+        ...r,
+        items,
+        subtotal,
+        extraCharges: 0,
+        creditsOrAdjustments: Math.max(0, parseFloat((subtotal - (r.totalAmount || 0)).toFixed(2))),
+        invoiceNumber: `INV-${r.year}${String(r.month).padStart(2, '0')}-${String(r.id).slice(0, 4).toUpperCase()}`,
+        monthName: `${monthNames[(r.month || 1) - 1]} ${r.year}`,
+      };
+    });
   } catch (err) {
     console.error('[BillingService] getInvoices error:', err);
     return [];
@@ -105,7 +144,9 @@ export async function generateMonthlyInvoice(params: {
 
     // 2. Fetch all billable deliveries for this month
     const startStr = `${params.year}-${String(params.month).padStart(2, '0')}-01`;
-    const endStr = `${params.year}-${String(params.month).padStart(2, '0')}-31`;
+    // Calculate the actual last day of the month to avoid issues with shorter months.
+    const lastDayOfMonth = new Date(params.year, params.month, 0).getDate();
+    const endStr = `${params.year}-${String(params.month).padStart(2, '0')}-${String(lastDayOfMonth).padStart(2, '0')}`;
 
     const delRes = await client.query(
       `SELECT id, date, delivered_quantity::float as qty, price_per_unit::float as price

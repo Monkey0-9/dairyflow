@@ -9,6 +9,8 @@
  * Variance = Actual Closing - Expected Closing
  */
 
+import { generateAIDemandForecast } from "@/lib/ai-forecasting";
+
 export interface InventoryBalanceParams {
   date: string;
   tenantId?: string;

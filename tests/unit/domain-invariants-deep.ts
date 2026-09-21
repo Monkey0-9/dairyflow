@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { LIVE_DB_TESTS_ENABLED } from '../setup';
 import { createSubscriptionVersion, createProductPriceHistory, getLockedUnitPrice } from '@/lib/services/subscription-pricing.service';
 import { executeIdempotentOperation } from '@/lib/security/idempotency';
 import { computeStatementBalance } from '@/lib/services/billing.service';
@@ -17,7 +18,7 @@ describe('Deep Domain Invariants & Enterprise Quality Audit', () => {
     expect(calc.status).toBe('PARTIALLY_PAID');
   });
 
-  it('guarantees universal mutation idempotency with operationId caching and replay safety', async () => {
+  it.skipIf(!LIVE_DB_TESTS_ENABLED)('guarantees universal mutation idempotency with operationId caching and replay safety', async () => {
     let executionCount = 0;
     const mockMutation = async () => {
       executionCount += 1;
@@ -39,7 +40,7 @@ describe('Deep Domain Invariants & Enterprise Quality Audit', () => {
     expect(executionCount).toBe(1); // Function was NOT called a second time!
   });
 
-  it('creates effective-dated subscription versions and product price history', async () => {
+  it.skipIf(!LIVE_DB_TESTS_ENABLED)('creates effective-dated subscription versions and product price history', async () => {
     const { query } = await import('@/lib/db');
     const prodRes = await query<{ id: string }>('SELECT id FROM products LIMIT 1');
     const validProdId = prodRes.rows[0]?.id || 'prod_cow_milk';

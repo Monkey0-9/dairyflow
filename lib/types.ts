@@ -85,6 +85,8 @@ export interface CustomerProfile {
   accountStatus: AccountStatus;
   notes?: string;
   walletBalance?: number;
+  latitude?: number;
+  longitude?: number;
 }
 
 export interface Product {
@@ -372,6 +374,7 @@ export interface ExtraMilkRequest {
   farmerId: string;
   subscriptionId?: string;
   date: string; // YYYY-MM-DD
+  milkType?: string; // 'COW' | 'BUFFALO' | 'Cow' | 'Buffalo'
   normalQuantity: number;
   requestedQuantity: number; // Total requested for that day
   reason: string;

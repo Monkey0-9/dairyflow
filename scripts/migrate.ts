@@ -314,7 +314,29 @@ async function migrate() {
       UNIQUE(tenant_id, index)
     );`,
 
+    // 21. Delivery Corrections (Post-Day-Close Adjustments - FR-DEL-009)
+    `CREATE TABLE IF NOT EXISTS delivery_corrections (
+      id VARCHAR(64) PRIMARY KEY,
+      tenant_id VARCHAR(64) NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+      delivery_record_id VARCHAR(64) NOT NULL REFERENCES delivery_records(id) ON DELETE CASCADE,
+      farmer_id VARCHAR(64) NOT NULL REFERENCES farmer_profiles(id) ON DELETE CASCADE,
+      customer_id VARCHAR(64) NOT NULL REFERENCES customer_profiles(id) ON DELETE CASCADE,
+      date VARCHAR(10) NOT NULL,
+      original_quantity NUMERIC(6,2) NOT NULL,
+      corrected_quantity NUMERIC(6,2) NOT NULL,
+      original_status VARCHAR(32) NOT NULL,
+      corrected_status VARCHAR(32) NOT NULL,
+      reason TEXT NOT NULL,
+      authorized_by VARCHAR(64) NOT NULL,
+      authorized_role VARCHAR(32) NOT NULL,
+      status VARCHAR(32) DEFAULT 'APPLIED',
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      applied_at TIMESTAMPTZ DEFAULT NOW()
+    );`,
+
     // Indexes for fast querying
+    `CREATE INDEX IF NOT EXISTS idx_delivery_corrections_farmer_date ON delivery_corrections(farmer_id, date);`,
+    `CREATE INDEX IF NOT EXISTS idx_delivery_corrections_customer ON delivery_corrections(customer_id);`,
     `CREATE INDEX IF NOT EXISTS idx_delivery_farmer_date ON delivery_records(farmer_id, date);`,
     `CREATE INDEX IF NOT EXISTS idx_delivery_customer_date ON delivery_records(customer_id, date);`,
     `CREATE INDEX IF NOT EXISTS idx_invoices_customer ON invoices(customer_id);`,

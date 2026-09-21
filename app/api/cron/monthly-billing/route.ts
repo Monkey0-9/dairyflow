@@ -1,18 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { generateMonthlyInvoice } from '@/lib/services/billing.service';
+import { authorizeCron } from '@/lib/cron-auth';
 
 const isUnitTest = () => process.env.TEST_ENV === 'unit' || process.env.VITEST === 'true';
 
 export async function GET(req: NextRequest) {
-  // Verify Vercel Cron invocation or CRON_SECRET authorization
-  const authHeader = req.headers.get('authorization');
-  const cronSecret = process.env.CRON_SECRET;
-  const isVercelCron = req.headers.get('user-agent')?.includes('vercel-cron');
-
-  if (cronSecret && authHeader !== `Bearer ${cronSecret}` && !isVercelCron) {
-    return NextResponse.json({ success: false, error: 'Unauthorized cron request' }, { status: 401 });
-  }
+  // Centralized fail-closed cron authorization
+  const authError = authorizeCron(req);
+  if (authError) return authError;
 
   // Calculate billing month (defaults to previous calendar month)
   const now = new Date();

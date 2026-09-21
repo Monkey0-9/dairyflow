@@ -99,11 +99,14 @@ export async function POST(req: NextRequest) {
         const email = `${row.phone.replace(/[^0-9]/g, '')}_${customerId.slice(0, 6)}@milkflow.local`;
         const qrToken = `qr_${customerId}`;
 
-        // 1. Create User
+        // 1. Create User in unactivated state with cryptographically unmatchable password hash
+        // Account remains locked (is_active=false) until the customer activates it via their invitation token
+        const unusableHash = `!INVITED_LOCKED_${crypto.randomBytes(32).toString('hex')}`;
+        const randomSalt = crypto.randomBytes(16).toString('hex');
         await client.query(
           `INSERT INTO users (id, tenant_id, email, phone, name, password_hash, password_salt, role, is_active, created_at, updated_at)
-           VALUES ($1, $2, $3, $4, $5, 'INVITED_PENDING_ACTIVATION', 'SALT', 'CUSTOMER', false, NOW(), NOW())`,
-          [userId, tenantId, email, row.phone, row.name]
+           VALUES ($1, $2, $3, $4, $5, $6, $7, 'CUSTOMER', false, NOW(), NOW())`,
+          [userId, tenantId, email, row.phone, row.name, unusableHash, randomSalt]
         );
 
         // 2. Create Customer Profile in INVITED state

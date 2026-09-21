@@ -7,9 +7,29 @@ export interface EffectiveDatedRange {
 }
 
 function toTime(v: Date | string | null | undefined, fallback: number): number {
-  if (v === null || v === undefined) return fallback;
-  const t = v instanceof Date ? v.getTime() : new Date(v).getTime();
-  return Number.isFinite(t) ? t : fallback;
+  if (v === null || v === undefined) {
+    return fallback;
+  }
+
+  const dateObj = v instanceof Date ? v : new Date(v);
+  const t = dateObj.getTime();
+
+  if (Number.isFinite(t)) {
+    return t;
+  } else {
+    // If 'v' was a string and resulted in an invalid date, throw an error.
+    // This indicates a data quality issue that should not silently fall back.
+    if (typeof v === 'string') {
+      console.error(`Invalid date string provided to toTime: "${v}". Returning fallback.`, new Error().stack);
+      return fallback;
+    }
+    // If 'v' was a Date object that somehow became invalid (e.g., new Date('invalid')
+    // was passed as a Date object, which is unlikely but possible), or any other
+    // non-string type that results in an invalid date, we also throw an error.
+    // This ensures that any unparseable date input (that isn't null/undefined)
+    // is treated as an error.
+    throw new Error(`Unexpected invalid date value provided to toTime: ${v}`);
+  }
 }
 
 /**

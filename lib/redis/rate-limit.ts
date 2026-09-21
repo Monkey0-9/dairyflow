@@ -36,7 +36,10 @@ export async function checkRateLimit(
       remaining,
       resetSeconds: Math.max(0, ttl),
     };
-  } catch {
+  } catch (err) {
+    console.error('[Redis RateLimit] Error checking rate limit for identifier:', identifier, err);
+    // Fail open (per docstring): callers fall back to the in-memory limiter
+    // so a Redis outage never locks users out of authentication.
     return { allowed: true, remaining: maxRequests, resetSeconds: windowSeconds };
   }
 }

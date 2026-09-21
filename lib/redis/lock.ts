@@ -19,9 +19,9 @@ export async function acquireLock(
       return lockToken;
     }
     return null;
-  } catch {
-    // If Redis is down, allow single instance to proceed safely using DB transactions
-    return lockToken;
+  } catch (err) {
+    console.error('[Redis Lock] Error acquiring lock for resource:', resourceKey, err);
+    return null; // Crucial: Do NOT return lockToken on error, as the lock was not acquired.
   }
 }
 
@@ -37,8 +37,9 @@ export async function releaseLock(
       return (del ?? 0) > 0;
     }
     return false;
-  } catch {
-    return true;
+  } catch (err) {
+    console.error('[Redis Lock] Error releasing lock for resource:', resourceKey, err);
+    return false; // Crucial: Do NOT return true on error, as the lock might not have been released.
   }
 }
 

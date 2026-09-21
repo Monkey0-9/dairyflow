@@ -2,10 +2,19 @@
 import { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
 import 'dotenv/config';
 
-const connectionString = process.env.DATABASE_URL;
+// Isolated test runs use a separate database when provided, so live-DB
+// suites never accidentally target production (SRS §21).
+const connectionString = process.env.TEST_DATABASE_URL || process.env.DATABASE_URL;
 
 if (!connectionString) {
-  console.warn('[DB] WARNING: DATABASE_URL is not set in environment variables.');
+  const errorMessage = '[FATAL CONFIGURATION ERROR] DATABASE_URL is not set in environment variables.';
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(errorMessage);
+  } else {
+    console.error(errorMessage + ' Application will likely fail if DB operations are attempted.');
+    // Optionally, you might want to throw here even in dev if DB is critical
+    // throw new Error(errorMessage);
+  }
 }
 
 // Global pool instance with connection pooling optimized for Neon / Serverless
@@ -20,7 +29,7 @@ export function getPool(): Pool {
     // Override with PG_POOL_MAX when a dedicated larger pool is provisioned.
     const max = Number(process.env.PG_POOL_MAX || (isServerless ? 3 : 10));
     pool = new Pool({
-      connectionString: process.env.DATABASE_URL,
+      connectionString: process.env.TEST_DATABASE_URL || process.env.DATABASE_URL,
       ssl: {
         rejectUnauthorized: false, // Required for Neon SSL connection
       },

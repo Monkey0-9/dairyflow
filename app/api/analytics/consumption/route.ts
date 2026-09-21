@@ -4,7 +4,8 @@ import { getStore } from '@/lib/store';
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
-    const date = searchParams.get('date') || '2026-09-18';
+    const todayIso = new Date().toISOString().split('T')[0];
+    const date = searchParams.get('date') || todayIso;
     const customerId = searchParams.get('customerId');
     const store = getStore();
 
@@ -96,9 +97,14 @@ export async function GET(req: NextRequest) {
     let mtdRevenue = 0;
 
     const productBreakdown: Record<string, number> = { Cow: 0, Buffalo: 0, A2: 0 };
+    const currentYearMonth = date.slice(0, 7);
+    const parsedDate = new Date(date);
+    const monthLabel = !isNaN(parsedDate.getTime())
+      ? parsedDate.toLocaleString('en-US', { month: 'long', year: 'numeric' })
+      : 'Current Month';
 
     for (const rec of store.deliveryRecords.values()) {
-      if (rec.date.startsWith('2026-09')) {
+      if (rec.date.startsWith(currentYearMonth)) {
         mtdExpected += rec.scheduledQuantity;
         if (rec.status === 'DELIVERED' || rec.status === 'PARTIAL' || rec.status === 'EXTRA') {
           mtdDelivered += rec.deliveredQuantity;
@@ -115,7 +121,7 @@ export async function GET(req: NextRequest) {
 
     let mtdCollected = 0;
     for (const p of store.payments) {
-      if (p.paidAt.startsWith('2026-09') && p.status === 'SUCCESS') {
+      if (p.paidAt.startsWith(currentYearMonth) && p.status === 'SUCCESS') {
         mtdCollected += p.amount;
       }
     }
@@ -126,7 +132,7 @@ export async function GET(req: NextRequest) {
       success: true,
       stats,
       monthToDate: {
-        month: 'September 2026',
+        month: monthLabel,
         expectedLitres: parseFloat(mtdExpected.toFixed(1)),
         deliveredLitres: parseFloat(mtdDelivered.toFixed(1)),
         skippedLitres: parseFloat(mtdSkipped.toFixed(1)),
@@ -142,6 +148,7 @@ export async function GET(req: NextRequest) {
       },
     });
   } catch (error: unknown) {
+    console.error('[analytics/consumption] Calculation error:', error);
     const message = error instanceof Error ? error.message : 'Failed to calculate analytics';
     return NextResponse.json({ success: false, error: message }, { status: 500 });
   }

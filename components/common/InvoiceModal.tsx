@@ -178,7 +178,7 @@ export default function InvoiceModal({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {invoice.items.map((item) => (
+                {(invoice.items || []).map((item) => (
                   <tr key={item.id} className="py-2.5">
                     <td className="py-3 font-semibold text-slate-900">{item.productName}</td>
                     <td className="py-3 text-center font-mono font-medium">

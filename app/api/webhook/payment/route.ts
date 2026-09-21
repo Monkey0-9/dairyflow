@@ -20,13 +20,12 @@ export async function POST(req: NextRequest) {
     }
     const rawBody = await req.text();
     const signature = req.headers.get('x-razorpay-signature') || req.headers.get('x-webhook-signature');
-    // Test fallback secret mirrors test suites; production still fail-closes
-    // when RAZORPAY_WEBHOOK_SECRET is absent (see check below).
-    const secret = process.env.RAZORPAY_WEBHOOK_SECRET || (isTestMode() ? 'whsec_milkflow_prod_demo_key_9812' : undefined);
+    // Test fallback secret mirrors test suites; production strictly requires RAZORPAY_WEBHOOK_SECRET
+    const secret = process.env.RAZORPAY_WEBHOOK_SECRET || (isTestMode() && process.env.NODE_ENV !== 'production' ? 'whsec_milkflow_prod_demo_key_9812' : undefined);
 
     // FR-PAY-003/004 + SEC-013: fail closed when secret missing (all envs except unit tests).
     if (!secret) {
-      if (isTestMode()) {
+      if (isTestMode() && process.env.NODE_ENV !== 'production') {
         // unit tests exercise idempotency without live secrets
       } else {
         return NextResponse.json(
@@ -55,7 +54,8 @@ export async function POST(req: NextRequest) {
         const a = Buffer.from(expectedSignature, 'hex');
         const b = Buffer.from(signature, 'hex');
         valid = a.length === b.length && crypto.timingSafeEqual(a, b);
-      } catch {
+      } catch (cryptoErr) {
+        console.error('[webhook/payment] Error verifying HMAC signature:', cryptoErr);
         valid = false;
       }
       if (!valid) {
@@ -121,7 +121,9 @@ export async function POST(req: NextRequest) {
         try {
           const store = getStore();
           store.recordPayment(invoiceId, parseFloat(amount), paymentMethod || 'UPI', transactionRef, note);
-        } catch { /* test store mirror */ }
+        } catch (storeErr) {
+          console.error('[webhook/payment] Test store mirror record payment failed:', storeErr);
+        }
       }
 
       return NextResponse.json({

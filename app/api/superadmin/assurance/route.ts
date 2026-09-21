@@ -18,11 +18,13 @@ export async function GET(req: NextRequest) {
     const genesisHash = '0000000000000000000000000000000000000000000000000000000000000000';
     const latestHash = '9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08';
 
+    const tenantId = auth.user.tenantId || 'tenant_greenvalley';
     try {
-      const auditStatus = await verifyAuditChain('tenant_greenvalley');
+      const auditStatus = await verifyAuditChain(tenantId);
       verifiedBlocks = Math.max(auditStatus.totalBlocks || 0, 1240);
       chainValid = auditStatus.valid;
-    } catch {
+    } catch (err) {
+      console.error('[superadmin/assurance] verifyAuditChain failed:', err);
       // In-memory or fallback
       verifiedBlocks = 1240;
     }
@@ -40,7 +42,8 @@ export async function GET(req: NextRequest) {
         LIMIT 10
       `);
       disputes = dispRes.rows;
-    } catch {
+    } catch (err) {
+      console.error('[superadmin/assurance] DB disputes query failed, fallback to store:', err);
       const store = getStore();
       disputes = store.disputes.slice(0, 10).map((d) => ({
         id: d.id,
@@ -65,7 +68,8 @@ export async function GET(req: NextRequest) {
         LIMIT 10
       `);
       requests = reqRes.rows;
-    } catch {
+    } catch (err) {
+      console.error('[superadmin/assurance] DB customer requests query failed:', err);
       requests = [];
     }
 

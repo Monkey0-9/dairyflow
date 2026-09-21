@@ -216,7 +216,9 @@ export async function POST(req: NextRequest) {
       try {
         const store = getStore();
         store.closeDay(date, input, { userId: auth.user.userId, name: actorName, role: 'FARMER' });
-      } catch { /* test store mirror */ }
+      } catch (err) {
+        console.error('[inventory/POST] Test store mirror closeDay failed:', err);
+      }
     }
 
     return NextResponse.json({

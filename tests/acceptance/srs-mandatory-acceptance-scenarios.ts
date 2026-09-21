@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
+import { LIVE_DB_TESTS_ENABLED } from '../setup';
 import { NextRequest } from 'next/server';
 import { query, transaction } from '@/lib/db';
 import { getStore } from '@/lib/store';
@@ -15,7 +16,7 @@ import { acquireDistributedLock } from '@/lib/redis/lock';
 import { POST as webhookPost } from '@/app/api/webhook/payment/route';
 import { generateAIDemandForecast } from '@/lib/ai-forecasting';
 
-describe('MF-SRS-001 Section 16.2: Mandatory Acceptance Scenarios (AT-01 to AT-16)', () => {
+describe.skipIf(!LIVE_DB_TESTS_ENABLED)('MF-SRS-001 Section 16.2: Mandatory Acceptance Scenarios (AT-01 to AT-16)', () => {
   const testId = `srs_${Date.now()}_${Math.floor(Math.random() * 100000)}`;
   const tenantA = `tenant_a_${testId}`;
   const tenantB = `tenant_b_${testId}`;

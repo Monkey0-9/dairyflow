@@ -162,8 +162,12 @@ export async function generateAIDemandForecast(tenantId?: string): Promise<Compr
           else if (sub.productId === 'prod_a2_milk') a2MilkDemand += sub.defaultQuantity;
         }
       }
-    } catch { /* store fallback */ }
+    } catch (storeErr) {
+      console.warn('[AIForecasting] In-memory store read error:', storeErr);
+    }
   }
+
+  const metrics = calculateModelMetrics(historicalDailyActuals, baseScheduled);
 
   const sevenDayForecast: AIForecastItem[] = [];
 
@@ -176,7 +180,7 @@ export async function generateAIDemandForecast(tenantId?: string): Promise<Compr
 
     const weekendMultiplier = dayOfWeek === 0 || dayOfWeek === 6 ? 1.08 : 1.0;
     const predictedDemand = Math.round((baseScheduled * weekendMultiplier) * 10) / 10;
-    const stdDev = 0.35;
+    const stdDev = metrics.rmseLitres > 0 ? metrics.rmseLitres : 0.35; // Use RMSE as stdDev, fallback to 0.35 if no historical data
     const predictionIntervalLower = parseFloat(Math.max(0, predictedDemand - 1.96 * stdDev).toFixed(1));
     const predictionIntervalUpper = parseFloat((predictedDemand + 1.96 * stdDev).toFixed(1));
     const safetyBufferLitres = parseFloat((predictedDemand * 0.06).toFixed(1));
@@ -204,8 +208,6 @@ export async function generateAIDemandForecast(tenantId?: string): Promise<Compr
   const tomorrowDemand = tomorrowItem?.predictedDemandLitres || baseScheduled;
   const safetyStockLitres = tomorrowItem?.safetyBufferLitres || 0;
   const recommendedProduction = parseFloat((tomorrowDemand + safetyStockLitres).toFixed(1));
-
-  const metrics = calculateModelMetrics(historicalDailyActuals, baseScheduled);
 
   const insightNotes = historicalDailyActuals.length > 0
     ? [
@@ -264,14 +266,15 @@ export interface DemandPlan {
  */
 export function calculateDemandPlanning(forecast: ComprehensiveForecast): DemandPlan {
   // Current farm inventory snapshot (from chiller vats)
-  const currentCowInv = 12.0;
-  const currentBuffaloInv = 8.0;
-  const currentA2Inv = 3.0;
+  // TODO: Fetch real-time inventory from a database or inventory management system.
+  const currentCowInv = 12.0; // Placeholder: This should come from actual inventory data.
+  const currentBuffaloInv = 8.0; // Placeholder
+  const currentA2Inv = 3.0; // Placeholder
 
-  // Expected herd production tomorrow morning
-  const expectedCowProd = 45.0;
-  const expectedBuffaloProd = 20.0;
-  const expectedA2Prod = 7.0;
+  // TODO: Fetch expected production from a production schedule or planning system.
+  const expectedCowProd = 45.0; // Placeholder: This should come from actual production plans.
+  const expectedBuffaloProd = 20.0; // Placeholder
+  const expectedA2Prod = 7.0; // Placeholder
 
   const cowSafety = parseFloat((forecast.cowMilkDemand * 0.08).toFixed(1));
   const bufSafety = parseFloat((forecast.buffaloMilkDemand * 0.08).toFixed(1));

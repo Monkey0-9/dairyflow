@@ -18,7 +18,10 @@ export async function GET() {
     console.error('[Health Check] DB query failed:', err);
   }
 
-  const redis = await pingOutbox().catch(() => ({ configured: false, reachable: false, latencyMs: -1 }));
+  const redis = await pingOutbox().catch((err) => {
+    console.warn('[Health Check] Redis ping failed:', err);
+    return { configured: false, reachable: false, latencyMs: -1 };
+  });
 
   const pool = getPool();
   const poolStats = {

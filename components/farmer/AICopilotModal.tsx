@@ -44,7 +44,8 @@ export default function AICopilotModal({ onClose }: { onClose: () => void }) {
       } else {
         setAnswer(data.error || 'Copilot failed. Try again.');
       }
-    } catch {
+    } catch (err) {
+      console.error('[AICopilotModal] Request error:', err);
       setAnswer('Network error. Check connection and retry.');
     } finally {
       setLoading(false);
@@ -56,7 +57,9 @@ export default function AICopilotModal({ onClose }: { onClose: () => void }) {
       await navigator.clipboard.writeText(text);
       setCopied(id);
       window.setTimeout(() => setCopied(null), 2000);
-    } catch { /* clipboard unavailable */ }
+    } catch (err) {
+      console.warn('[AICopilotModal] Clipboard copy failed:', err);
+    }
   };
 
   return (

@@ -33,7 +33,7 @@ export function proxy(request: NextRequest) {
         return applySecurityHeaders(NextResponse.redirect(new URL('/admin', request.url)));
       } else if (session.role === 'CUSTOMER') {
         return applySecurityHeaders(NextResponse.redirect(new URL('/customer', request.url)));
-      } else if (session.role === 'ADMIN') {
+      } else if (session.role === 'ADMIN' || session.role === 'SUPERADMIN') {
         return applySecurityHeaders(NextResponse.redirect(new URL('/superadmin', request.url)));
       }
     }

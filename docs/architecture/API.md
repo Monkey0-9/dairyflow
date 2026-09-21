@@ -9,20 +9,14 @@ All API routes are located under `/api/*` and return standard JSON responses.
 ### `POST /api/auth/login`
 Authenticates user credentials and issues a signed session cookie.
 
-**Request Body (Option A - Credentials):**
+**Request Body (Credentials only — demo/persona login removed per SRS §21):**
 ```json
 {
-  "phone": "+919123456780",
-  "password": "Customer@2026!"
+  "identifier": "user@example.com",
+  "password": "<account password>"
 }
 ```
-
-**Request Body (Option B - 1-Tap Demo Switcher):**
-```json
-{
-  "demoUserId": "user_farmer"
-}
-```
+`identifier` accepts email or phone. `demoUserId` is rejected with 403 outside isolated unit tests.
 
 **Response (200 OK):**
 ```json

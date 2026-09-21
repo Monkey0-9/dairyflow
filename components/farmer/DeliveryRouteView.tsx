@@ -4,14 +4,8 @@ import React, { useState, useEffect } from 'react';
 import {
   MapPin,
   Navigation,
-  CheckCircle2,
-  Clock,
-  Phone,
-  Droplets,
   ExternalLink,
-  Shuffle,
   Flag,
-  ArrowDown,
   Sparkles,
   Milestone,
 } from 'lucide-react';
@@ -22,6 +16,7 @@ import {
   flushOfflineQueue,
   registerServiceWorker,
 } from '@/lib/offline-sync';
+import InteractiveRouteMap from './InteractiveRouteMap';
 
 interface DeliveryRouteViewProps {
   customers: CustomerProfile[];
@@ -41,6 +36,8 @@ export default function DeliveryRouteView({
   const [routeStops, setRouteStops] = useState<CustomerProfile[]>(
     [...customers].sort((a, b) => a.deliverySequence - b.deliverySequence)
   );
+  const [selectedStopId, setSelectedStopId] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<'both' | 'map' | 'timeline'>('both');
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [optimizedNotice, setOptimizedNotice] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
@@ -235,6 +232,64 @@ export default function DeliveryRouteView({
         </div>
       )}
 
+      {/* View Mode Toggle Bar */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-white p-3 rounded-2xl border border-slate-200 shadow-xs">
+        <div className="flex items-center gap-1.5 w-full sm:w-auto">
+          <button
+            onClick={() => setViewMode('both')}
+            className={`flex-1 sm:flex-initial px-3.5 py-1.5 rounded-xl text-xs font-bold transition ${
+              viewMode === 'both'
+                ? 'bg-slate-900 text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+            }`}
+          >
+            Circuit Map & Timeline
+          </button>
+          <button
+            onClick={() => setViewMode('map')}
+            className={`flex-1 sm:flex-initial px-3.5 py-1.5 rounded-xl text-xs font-bold transition ${
+              viewMode === 'map'
+                ? 'bg-slate-900 text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+            }`}
+          >
+            GPS Circuit Map Only
+          </button>
+          <button
+            onClick={() => setViewMode('timeline')}
+            className={`flex-1 sm:flex-initial px-3.5 py-1.5 rounded-xl text-xs font-bold transition ${
+              viewMode === 'timeline'
+                ? 'bg-slate-900 text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+            }`}
+          >
+            Timeline List Only
+          </button>
+        </div>
+
+        {selectedStopId && (
+          <button
+            onClick={() => setSelectedStopId(null)}
+            className="text-[11px] font-bold text-slate-500 hover:text-slate-800 self-end sm:self-center"
+          >
+            Clear Selected Stop ✕
+          </button>
+        )}
+      </div>
+
+      {/* Interactive Map Visualizer */}
+      {(viewMode === 'both' || viewMode === 'map') && (
+        <InteractiveRouteMap
+          routeStops={routeStops}
+          records={records}
+          selectedStopId={selectedStopId}
+          onSelectStop={setSelectedStopId}
+          onDrop={handleDrop}
+          onSkip={handleSkip}
+          busyRecordId={busyRecordId}
+        />
+      )}
+
       {/* Route Metrics Summary */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
@@ -263,56 +318,66 @@ export default function DeliveryRouteView({
       </div>
 
       {/* Visual Step-by-Step Route Timeline */}
-      <div className="bg-white rounded-3xl border border-slate-200 shadow-xs p-6 space-y-6">
-        {/* Origin: Farm */}
-        <div className="flex items-start gap-4">
-          <div className="w-10 h-10 rounded-2xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-md shadow-emerald-500/20 font-bold text-xs">
-            <Milestone className="w-5 h-5" />
-          </div>
-          <div className="flex-1 bg-emerald-50/70 border border-emerald-200 p-4 rounded-2xl">
-            <div className="flex justify-between items-center">
-              <h3 className="font-extrabold text-emerald-950 text-sm">
-                START: GreenValley Dairy Farm
-              </h3>
-              <span className="text-xs font-mono font-bold text-emerald-800">06:15 AM</span>
+      {(viewMode === 'both' || viewMode === 'timeline') && (
+        <div className="bg-white rounded-3xl border border-slate-200 shadow-xs p-6 space-y-6">
+          {/* Origin: Farm */}
+          <div className="flex items-start gap-4">
+            <div className="w-10 h-10 rounded-2xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-md shadow-emerald-500/20 font-bold text-xs">
+              <Milestone className="w-5 h-5" />
             </div>
-            <p className="text-xs text-emerald-800 mt-0.5">
-              Plot 42, Anand-Nadiad Highway • Load insulated milk crates into delivery van
-            </p>
+            <div className="flex-1 bg-emerald-50/70 border border-emerald-200 p-4 rounded-2xl">
+              <div className="flex justify-between items-center">
+                <h3 className="font-extrabold text-emerald-950 text-sm">
+                  START: GreenValley Dairy Farm
+                </h3>
+                <span className="text-xs font-mono font-bold text-emerald-800">06:15 AM</span>
+              </div>
+              <p className="text-xs text-emerald-800 mt-0.5">
+                Plot 42, Anand-Nadiad Highway • Load insulated milk crates into delivery van
+              </p>
+            </div>
           </div>
-        </div>
 
-        {/* Stops Sequence */}
-        <div className="space-y-4 pl-5 border-l-2 border-dashed border-emerald-300 ml-5">
-          {routeStops.map((cust, idx) => {
-            const record = records.find((r) => r.customerId === cust.id);
-            const isDelivered = record?.status === 'DELIVERED' || record?.status === 'EXTRA';
-            const isSkipped = record?.status === 'SKIPPED';
+          {/* Stops Sequence */}
+          <div className="space-y-4 pl-5 border-l-2 border-dashed border-emerald-300 ml-5">
+            {routeStops.map((cust, idx) => {
+              const record = records.find((r) => r.customerId === cust.id);
+              const isDelivered = record?.status === 'DELIVERED' || record?.status === 'EXTRA';
+              const isSkipped = record?.status === 'SKIPPED';
+              const isSelected = selectedStopId === cust.id;
 
-            return (
-              <div key={cust.id} className="relative group">
-                {/* Stop Marker Dot */}
+              return (
                 <div
-                  className={`absolute -left-[31px] top-4 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold border-2 border-white shadow-xs ${
-                    isDelivered
-                      ? 'bg-emerald-600 text-white'
-                      : isSkipped
-                      ? 'bg-rose-500 text-white'
-                      : 'bg-slate-800 text-white'
-                  }`}
+                  key={cust.id}
+                  className="relative group cursor-pointer"
+                  onClick={() => setSelectedStopId(isSelected ? null : cust.id)}
                 >
-                  {idx + 1}
-                </div>
+                  {/* Stop Marker Dot */}
+                  <div
+                    className={`absolute -left-7.75 top-4 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold border-2 border-white shadow-xs ${
+                      isDelivered
+                        ? 'bg-emerald-600 text-white'
+                        : isSkipped
+                        ? 'bg-rose-500 text-white'
+                        : isSelected
+                        ? 'bg-emerald-700 text-white ring-2 ring-emerald-400'
+                        : 'bg-slate-800 text-white'
+                    }`}
+                  >
+                    {idx + 1}
+                  </div>
 
-                <div
-                  className={`p-5 rounded-2xl border transition-all ${
-                    isDelivered
-                      ? 'bg-emerald-50/30 border-emerald-200'
-                      : isSkipped
-                      ? 'bg-slate-50 border-slate-200 opacity-80'
-                      : 'bg-white border-slate-200 hover:border-emerald-400'
-                  }`}
-                >
+                  <div
+                    className={`p-5 rounded-2xl border transition-all ${
+                      isSelected
+                        ? 'bg-emerald-50/60 border-emerald-500 ring-2 ring-emerald-400/50 shadow-sm'
+                        : isDelivered
+                        ? 'bg-emerald-50/30 border-emerald-200'
+                        : isSkipped
+                        ? 'bg-slate-50 border-slate-200 opacity-80'
+                        : 'bg-white border-slate-200 hover:border-emerald-400'
+                    }`}
+                  >
                   <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
                     <div>
                       <div className="flex items-center gap-2">
@@ -398,6 +463,7 @@ export default function DeliveryRouteView({
           </div>
         </div>
       </div>
+      )}
     </div>
   );
 }

@@ -30,9 +30,14 @@ export function MemberStatements({
     const isPaid = inv.status === 'PAID' || inv.paidAmount >= inv.totalAmount;
     const isOverdue = inv.status === 'OVERDUE' || (!isPaid && new Date(inv.dueDate).getTime() < nowMs);
     const isPartial = inv.paidAmount > 0 && inv.paidAmount < inv.totalAmount;
+    const pendingPayment = payments.find(
+      (p) => p.invoiceId === inv.id && p.status === 'PENDING'
+    );
+    const isVerifying = !isPaid && !!pendingPayment;
 
     let status: StatementItem['status'] = 'PENDING';
     if (isPaid) status = 'PAID';
+    else if (isVerifying) status = 'VERIFYING';
     else if (isOverdue) status = 'OVERDUE';
     else if (isPartial) status = 'PARTIAL';
 
@@ -52,12 +57,13 @@ export function MemberStatements({
       totalAmount: inv.totalAmount || 0,
       paidAmount: inv.paidAmount || 0,
       status,
+      pendingUtr: pendingPayment?.transactionRef,
       hashVerified: true,
     };
   });
 
   const totalVolumeYTD = invoices.reduce((acc, inv) => acc + (inv.totalQuantity || 0), 0);
-  const totalPaidYTD = payments.reduce((acc, p) => acc + (p.amount || 0), 0);
+  const totalPaidYTD = payments.reduce((acc, p) => (p.status === 'SUCCESS' ? acc + (p.amount || 0) : acc), 0);
   const currentOutstanding = invoices.reduce(
     (acc, inv) => acc + Math.max(0, (inv.totalAmount || 0) - (inv.paidAmount || 0)),
     0
@@ -67,12 +73,12 @@ export function MemberStatements({
     <div className="space-y-6">
       {/* Financial Overview Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <Card className="p-6">
+        <Card className="p-6 bg-white border border-slate-200 shadow-xs">
           <div className="flex items-center gap-2 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
             <CreditCard className="w-4 h-4 text-amber-600" />
             <span>Outstanding Balance</span>
           </div>
-          <div className="text-2xl font-black text-slate-900 dark:text-white mt-2 tabular-nums">
+          <div className="text-2xl font-black text-slate-900 mt-2 tabular-nums">
             ₹{currentOutstanding.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
           </div>
           <div className="text-[11px] text-slate-500 mt-1">
@@ -80,12 +86,12 @@ export function MemberStatements({
           </div>
         </Card>
 
-        <Card className="p-6">
+        <Card className="p-6 bg-white border border-slate-200 shadow-xs">
           <div className="flex items-center gap-2 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
             <FileCheck className="w-4 h-4 text-emerald-600" />
             <span>Total Settled YTD</span>
           </div>
-          <div className="text-2xl font-black text-slate-900 dark:text-white mt-2 tabular-nums">
+          <div className="text-2xl font-black text-slate-900 mt-2 tabular-nums">
             ₹{totalPaidYTD.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
           </div>
           <div className="text-[11px] text-slate-500 mt-1">
@@ -93,12 +99,12 @@ export function MemberStatements({
           </div>
         </Card>
 
-        <Card className="p-6">
+        <Card className="p-6 bg-white border border-slate-200 shadow-xs">
           <div className="flex items-center gap-2 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
             <ShieldCheck className="w-4 h-4 text-blue-600" />
             <span>Volume Delivered YTD</span>
           </div>
-          <div className="text-2xl font-black text-slate-900 dark:text-white mt-2 tabular-nums">
+          <div className="text-2xl font-black text-slate-900 mt-2 tabular-nums">
             {totalVolumeYTD.toFixed(1)} <span className="text-sm font-normal text-slate-400">L</span>
           </div>
           <div className="text-[11px] text-slate-500 mt-1">
@@ -111,7 +117,7 @@ export function MemberStatements({
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-base font-black text-slate-900 dark:text-white tracking-tight">
+            <h2 className="text-base font-black text-slate-900 tracking-tight">
               Official Itemized Statements
             </h2>
             <p className="text-xs text-slate-500">

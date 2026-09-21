@@ -85,7 +85,8 @@ export async function GET(req: NextRequest) {
           cowLitres += q;
         }
       }
-    } catch {
+    } catch (err) {
+      console.error('[analytics/farmer] DB delivery records query failed, falling back to store:', err);
       // Store fallback
       const records = Array.from(store.deliveryRecords.values()).filter(
         (r) => r.date >= fromDate && r.date <= toDate
@@ -120,7 +121,8 @@ export async function GET(req: NextRequest) {
         totalCollected = invRes.rows[0].paid;
         totalOutstanding = invRes.rows[0].out;
       }
-    } catch {
+    } catch (err) {
+      console.error('[analytics/farmer] DB invoices summary query failed, falling back to store:', err);
       totalRevenue = store.invoices.reduce((sum, i) => sum + i.totalAmount, 0);
       totalCollected = store.invoices.reduce((sum, i) => sum + i.paidAmount, 0);
       totalOutstanding = store.invoices.reduce((sum, i) => sum + i.outstandingAmount, 0);

@@ -50,7 +50,8 @@ export async function GET(req: NextRequest) {
         dailyQuantity = row.daily_quantity || 1.0;
         deliveryAddress = row.delivery_address || '';
       }
-    } catch {
+    } catch (err) {
+      console.error('[customer/360] DB customer profile query failed, using store fallback:', err);
       const store = getStore();
       const stCust = store.customers.find((c) => c.id === customerId);
       if (stCust) {
@@ -83,7 +84,8 @@ export async function GET(req: NextRequest) {
           skippedDrops++;
         }
       }
-    } catch {
+    } catch (err) {
+      console.error('[customer/360] DB delivery records query failed, using store fallback:', err);
       const store = getStore();
       const records = Array.from(store.deliveryRecords.values()).filter((r) => r.customerId === customerId);
       for (const d of records) {
@@ -116,7 +118,8 @@ export async function GET(req: NextRequest) {
         totalPaid = invRes.rows[0].paid;
         currentOutstanding = invRes.rows[0].outstanding;
       }
-    } catch {
+    } catch (err) {
+      console.error('[customer/360] DB invoices query failed, using store fallback:', err);
       const store = getStore();
       const custInvoices = store.invoices.filter((i) => i.customerId === customerId);
       totalInvoiced = custInvoices.reduce((sum, i) => sum + i.totalAmount, 0);

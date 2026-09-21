@@ -38,13 +38,14 @@ test.describe('Client Creation & Client Login E2E', () => {
 
     // Step 3: Test Browser UI Login as the new client using PHONE NUMBER
     await page.goto('/login');
-    const identifierInput = page.locator('input[type="text"], input[type="email"], input[name="identifier"]').first();
-    const passwordInput = page.locator('input[type="password"]').first();
-    const submitBtn = page.locator('button[type="submit"]').first();
-
-    await identifierInput.fill(testPhone);
-    await passwordInput.fill(testPassword);
-    await submitBtn.click();
+    // Handle demo mode: click Credentials tab if present
+    const credTab = page.locator('#tab-credentials');
+    if (await credTab.isVisible()) {
+      await credTab.click();
+    }
+    await page.locator('#login-identifier').fill(testPhone);
+    await page.locator('#login-password').fill(testPassword);
+    await page.locator('button[type="submit"]').first().click();
 
     // Verify redirected to /customer portal
     await expect(page).toHaveURL(/\/customer/, { timeout: 10000 });
@@ -53,13 +54,17 @@ test.describe('Client Creation & Client Login E2E', () => {
     // Step 4: Verify navigation to Customer QR Verification page
     await page.goto('/customer/qr');
     await expect(page).toHaveURL(/\/customer\/qr/, { timeout: 10000 });
-    await expect(page.getByRole('heading', { name: 'Private Client Pass' })).toBeVisible({ timeout: 8000 });
+    await expect(page.getByRole('heading', { name: 'UPI & QR Code Payment' })).toBeVisible({ timeout: 8000 });
 
     // Step 5: Test Client Login using EMAIL
     await page.context().clearCookies();
     await page.goto('/login');
-    await page.locator('input[type="text"], input[type="email"], input[name="identifier"]').first().fill(testEmail);
-    await page.locator('input[type="password"]').first().fill(testPassword);
+    const credTab2 = page.locator('#tab-credentials');
+    if (await credTab2.isVisible()) {
+      await credTab2.click();
+    }
+    await page.locator('#login-identifier').fill(testEmail);
+    await page.locator('#login-password').fill(testPassword);
     await page.locator('button[type="submit"]').first().click();
 
     await expect(page).toHaveURL(/\/customer/, { timeout: 10000 });

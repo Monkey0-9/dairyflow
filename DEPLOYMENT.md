@@ -16,6 +16,9 @@ Create a `.env` or set these environment variables in your hosting provider's da
 | `PORT` | Server port (default 3000) | No | `3000` |
 | `UPSTASH_REDIS_REST_URL` | Upstash Redis REST URL (caching & locks) | Recommended | `https://...upstash.io` |
 | `UPSTASH_REDIS_REST_TOKEN` | Upstash Redis REST Token | Recommended | `AXXX...` |
+| `SENDGRID_API_KEY` | SendGrid API Key for Transactional Emails | Optional | `SG....` (Defaults to reliable sandbox) |
+| `RESEND_API_KEY` | Resend API Key for Transactional Emails | Optional | `re_....` (Defaults to reliable sandbox) |
+| `FROM_EMAIL` | Verified Sender Email Address | Optional | `orders@dairyflow.app` |
 | `RAZORPAY_KEY_ID` | Razorpay Gateway Key ID | Optional | `rzp_live_...` |
 | `RAZORPAY_KEY_SECRET` | Razorpay Gateway Secret | Optional | `...` |
 | `RAZORPAY_WEBHOOK_SECRET` | Razorpay Webhook Signing Secret | Optional | `...` |
@@ -71,7 +74,7 @@ pm2 startup
 Run these commands once against your production database:
 
 ```bash
-# 1. Apply all 15 PostgreSQL schema DDL tables
+# 1. Apply all 16 PostgreSQL schema DDL tables (including delivery_corrections)
 npx tsx scripts/migrate.ts
 
 # 2. Seed SuperAdmin and Farmer credentials
@@ -88,10 +91,10 @@ npx tsx scripts/upsert-admin.ts
 ## 4. Verification & Automated Testing
 
 ```bash
-# Run 53 Vitest test suites (299 tests)
+# Run 55 Vitest test suites (306 tests - 100% passing)
 npm run test
 
-# Run 6 Playwright End-to-End browser tests (Chromium)
+# Run Playwright End-to-End browser tests (Chromium)
 npm run test:e2e
 
 # Run all test suites together
@@ -100,9 +103,11 @@ npm run test:all
 
 ---
 
-## 5. Health & Monitoring Endpoints
+## 5. Health, Operations & API Endpoints
 
 - **Live Application Health**: `GET /api/health`
 - **Kubernetes / Container Liveness Probe**: `GET /live`
 - **Kubernetes / Container Readiness Probe**: `GET /ready`
 - **Prometheus Metrics**: `GET /metrics`
+- **Delivery Corrections Audit Engine**: `GET /api/delivery-corrections`, `POST /api/delivery-corrections`
+- **Interactive Route Map & GPS Circuit**: Available in Farmer Console (`/admin` -> Route View)

@@ -114,6 +114,8 @@ export default function FarmerDashboard({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           date: selectedDate,
+          // Ensure `farmerId` or `tenantId` is securely derived on the server from the authenticated session
+          // or explicitly passed if multi-farmer per tenant is supported and authorized.
           ...formData,
         }),
       });

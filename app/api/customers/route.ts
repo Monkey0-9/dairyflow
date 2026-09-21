@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import crypto from 'crypto';
 import { getStore } from '@/lib/store';
 import { query } from '@/lib/db';
 import { isTestMode, newUuid, isUuid, resolveDbScope } from '@/lib/db-scope';
@@ -137,6 +138,17 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ success: false, error: 'Customer not found' }, { status: 404 });
       }
 
+      // Customer privacy: customer can only access their own data
+      if (session && session.role === 'CUSTOMER') {
+        const isSelf = (session.customerId && customer.id === session.customerId) || (session.userId && customer.userId === session.userId);
+        if (!isSelf) {
+          return NextResponse.json(
+            { success: false, error: "Forbidden: Access denied. You cannot view other clients' data." },
+            { status: 403 }
+          );
+        }
+      }
+
       // Tenant isolation: customers from other tenants cannot be accessed
       if (session && session.role !== 'SUPERADMIN' && customer.tenantId && customer.tenantId !== session.tenantId) {
         return NextResponse.json(
@@ -165,8 +177,13 @@ export async function GET(req: NextRequest) {
     const farmerId = searchParams.get('farmerId');
     let filteredCustomers = store.customers;
 
-    // Tenant isolation: filter strictly by tenantId when session is present
-    if (session && session.role !== 'SUPERADMIN') {
+    // Customer privacy: customers can ONLY see their own profile
+    if (session && session.role === 'CUSTOMER') {
+      filteredCustomers = filteredCustomers.filter(
+        (c) => (session.customerId && c.id === session.customerId) || (session.userId && c.userId === session.userId)
+      );
+    } else if (session && session.role !== 'SUPERADMIN') {
+      // Tenant isolation: filter strictly by tenantId when session is present
       filteredCustomers = filteredCustomers.filter((c) => !c.tenantId || c.tenantId === session.tenantId);
     }
 
@@ -235,8 +252,8 @@ export async function POST(req: NextRequest) {
     const effectiveFarmerId = session?.farmerId || session?.userId || store.farmer.id;
 
     const cleanDigits = body.phone.replace(/[^0-9]/g, '');
-    const email = body.email ? body.email.trim().toLowerCase() : `${cleanDigits || Date.now()}@dairyclient.com`;
-    const password = body.password ? body.password.trim() : `Milk#${Math.floor(1000 + Math.random() * 9000)}`;
+    const email = body.email ? body.email.trim().toLowerCase() : `${cleanDigits || 'cust_' + crypto.randomUUID().slice(0, 8)}@dairyclient.com`;
+    const password = body.password ? body.password.trim() : `Milk#${crypto.randomBytes(4).toString('hex')}!`;
 
     const newCustomer = store.addCustomer({
       name: body.name,
@@ -259,8 +276,9 @@ export async function POST(req: NextRequest) {
     const tokenHash = hashInvitationToken(rawToken);
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
 
-    // Dual-persist to PostgreSQL
-    try {
+    // Dual-persist to PostgreSQL in real runtimes only — unit tests must
+    // never write the live database (SRS §21). E2E/dev/prod use this path.
+    if (!isTest) try {
       const { hash, salt } = hashPassword(password);
       await query(
         `INSERT INTO users (id, tenant_id, email, phone, name, password_hash, password_salt, role, is_active)
@@ -573,7 +591,9 @@ async function createCustomerDurable(session: { userId: string; tenantId: string
     }
     const unitPrice = body.customPrice ? parseFloat(body.customPrice) : (product.basePrice ?? 50.0);
 
-    const email = body.email ? String(body.email).trim().toLowerCase() : `${String(body.phone).replace(/[^0-9]/g, '') || Date.now()}@dairyclient.com`;
+    const email = body.email
+      ? String(body.email).trim().toLowerCase()
+      : `${String(body.phone).replace(/[^0-9]/g, '') || 'cust_' + crypto.randomUUID().slice(0, 8)}@dairyclient.com`;
 
     // Explicit duplicate check — never silently drop on conflict.
     const dup = await query(`SELECT id FROM users WHERE phone = $1 OR email = $2 LIMIT 1`, [body.phone, email]);
@@ -593,7 +613,7 @@ async function createCustomerDurable(session: { userId: string; tenantId: string
 
     const initialPassword = body.password && String(body.password).trim()
       ? String(body.password).trim()
-      : `Milk#${Math.floor(1000 + Math.random() * 9000)}`;
+      : `Milk#${crypto.randomBytes(4).toString('hex')}!`;
     const { hash, salt } = hashPassword(initialPassword);
 
     await query(

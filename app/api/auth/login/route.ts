@@ -9,11 +9,15 @@ import {
   SESSION_COOKIE_NAME,
   SessionUser,
 } from '@/lib/auth';
-import { checkRateLimit } from '@/lib/security/rate-limiter';
+import { checkRateLimit as checkMemoryRateLimit } from '@/lib/security/rate-limiter';
+import { checkRateLimit as checkSharedRateLimit } from '@/lib/redis/rate-limit';
 import { query } from '@/lib/db';
 
 const isUnitTest = () => process.env.TEST_ENV === 'unit' || process.env.VITEST === 'true';
-const demoLoginEnabled = () => isUnitTest() || (process.env.NODE_ENV !== 'production' && process.env.DEMO_LOGIN_ENABLED === 'true');
+// SRS §21: demo/persona authentication exists ONLY as an isolated unit-test
+// fixture. Production and development runtimes authenticate against
+// PostgreSQL with real credentials — no demo fallback, no mock users.
+const demoLoginEnabled = () => isUnitTest();
 
 interface DbLoginRow {
   userId: string;
@@ -121,9 +125,20 @@ export async function POST(req: NextRequest) {
   const ip = req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || 'anonymous_ip';
   const isLoopback = ip === '127.0.0.1' || ip === '::1' || ip === 'localhost' || ip === 'anonymous_ip';
   const isTest = isUnitTest() || process.env.PLAYWRIGHT === 'true' || process.env.CI === 'true';
-  const limitCheck = isTest && isLoopback
-    ? { allowed: true, resetTimeSeconds: 0 }
-    : checkRateLimit(`login_${ip}`, 50, 60);
+  // SRS §21: shared Redis limiter when configured (multi-instance safe),
+  // resilient in-memory fallback otherwise. Redis outage fails open.
+  const useSharedLimiter = Boolean(
+    process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN
+  );
+  let limitCheck = { allowed: true, resetTimeSeconds: 0 };
+  if (!(isTest && isLoopback)) {
+    if (useSharedLimiter) {
+      const shared = await checkSharedRateLimit(`login_${ip}`, 50, 60);
+      limitCheck = { allowed: shared.allowed, resetTimeSeconds: shared.resetSeconds };
+    } else {
+      limitCheck = checkMemoryRateLimit(`login_${ip}`, 50, 60);
+    }
+  }
   if (!limitCheck.allowed) {
     return NextResponse.json(
       { success: false, error: 'Too many login attempts. Please try again later.' },
@@ -140,28 +155,14 @@ export async function POST(req: NextRequest) {
     let sessionUser: SessionUser | null = null;
 
     if (demoUserId) {
-      if (!demoLoginEnabled()) {
+      // Removed from all runtimes except isolated unit tests (SRS §21).
+      if (!demoLoginEnabled() || !PRESET_DEMO_USERS[demoUserId]) {
         return NextResponse.json(
           { success: false, error: 'Demo persona login is disabled in this environment. Please sign in with real credentials.' },
           { status: 403 }
         );
       }
-      if (PRESET_DEMO_USERS[demoUserId]) {
-        sessionUser = PRESET_DEMO_USERS[demoUserId];
-      } else {
-        const user = store.users.find((u) => u.id === demoUserId);
-        const cust = store.customers.find((c) => c.userId === demoUserId);
-        if (user) {
-          sessionUser = {
-            userId: user.id,
-            name: user.name,
-            role: user.role,
-            tenantId: user.tenantId,
-            customerId: cust?.id,
-            email: user.email,
-          };
-        }
-      }
+      sessionUser = PRESET_DEMO_USERS[demoUserId];
     } else if (userIdentifier) {
       // 1) Production DB credential verification (password + active flags enforced)
       if (!isUnitTest()) {

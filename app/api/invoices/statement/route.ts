@@ -28,7 +28,8 @@ export async function GET(req: NextRequest) {
         if (invRes.rows.length > 0) {
           customerId = invRes.rows[0].customer_id;
         }
-      } catch {
+      } catch (err) {
+        console.error('[invoices/statement] DB invoice query failed, fallback to store:', err);
         const store = getStore();
         const stInv = store.invoices.find((i) => i.id === invoiceId);
         if (stInv) customerId = stInv.customerId;
@@ -48,8 +49,9 @@ export async function GET(req: NextRequest) {
       if (ownershipViolation) return ownershipViolation;
     }
 
+    const lastDay = new Date(year, month, 0).getDate();
     const startStr = `${year}-${String(month).padStart(2, '0')}-01`;
-    const endStr = `${year}-${String(month).padStart(2, '0')}-31`;
+    const endStr = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
 
     // 1. Fetch deliveries from PostgreSQL
     let deliveries: Array<{ date: string; status: string; qty: number; rate: number }> = [];
@@ -62,7 +64,8 @@ export async function GET(req: NextRequest) {
         [customerId, startStr, endStr]
       );
       deliveries = delRes.rows as unknown as Array<{ date: string; status: string; qty: number; rate: number }>;
-    } catch {
+    } catch (err) {
+      console.error('[invoices/statement] DB deliveries query failed, fallback to store:', err);
       const store = getStore();
       const stDeliveries = Array.from(store.deliveryRecords.values()).filter(
         (d) => d.customerId === customerId && d.date >= startStr && d.date <= endStr
@@ -103,11 +106,11 @@ export async function GET(req: NextRequest) {
         [customerId, startStr, endStr]
       );
       disputeAdjustments = dispRes.rows[0]?.totalAdjusted || 0;
-    } catch {
-      // ignore
+    } catch (err) {
+      console.error('[invoices/statement] DB disputes query failed:', err);
     }
 
-    const grossTotal = Math.max(0, regularAmount + extraAmount - disputeAdjustments);
+    const grossTotal = Math.max(0, Math.round((regularAmount + extraAmount - disputeAdjustments) * 100) / 100);
 
     // 3. Fetch payments
     let payments: Array<{ id: string; amount: number; method: string; date: string; ref: string }> = [];
@@ -121,7 +124,8 @@ export async function GET(req: NextRequest) {
       );
       payments = payRes.rows as unknown as Array<{ id: string; amount: number; method: string; date: string; ref: string }>;
       totalPaid = payments.reduce((sum, p) => sum + p.amount, 0);
-    } catch {
+    } catch (err) {
+      console.error('[invoices/statement] DB payments query failed, fallback to store:', err);
       const store = getStore();
       const stPayments = store.payments.filter((p) => p.customerId === customerId && p.status === 'SUCCESS');
       payments = stPayments.map((p) => ({

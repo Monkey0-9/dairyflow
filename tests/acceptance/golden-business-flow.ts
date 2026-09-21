@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { LIVE_DB_TESTS_ENABLED } from '../setup';
 import { NextRequest } from 'next/server';
 import { query, transaction } from '@/lib/db';
 import { hashPassword, encodeSignedSession, SessionUser } from '@/lib/auth';
@@ -10,7 +11,7 @@ import { recalculateInvoice } from '@/lib/services/billing.service';
 import { appendAuditLog, verifyAuditChain } from '@/lib/services/audit.service';
 import crypto from 'crypto';
 
-describe('Stage 3: The Golden Business Flow (End-to-End)', () => {
+describe.skipIf(!LIVE_DB_TESTS_ENABLED)('Stage 3: The Golden Business Flow (End-to-End)', () => {
   const runId = Date.now();
   const tenantId = `tenant_golden_${runId}`;
   const farmerUserId = `user_fg_${runId}`;

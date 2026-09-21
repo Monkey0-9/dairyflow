@@ -48,7 +48,7 @@ export async function queueDeliveryMutation(m: Omit<QueuedDeliveryMutation, 'que
     const req = store.add({ ...m, queuedAt: new Date().toISOString() });
     req.onsuccess = () => resolve(Number(req.result));
     req.onerror = () => reject(req.error);
-    tx.oncomplete = () => db.close();
+    tx.oncomplete = () => { /* db.close(); */ };
   });
 }
 
@@ -59,10 +59,11 @@ export async function listQueuedMutations(): Promise<QueuedDeliveryMutation[]> {
       const tx = db.transaction(STORE, 'readonly');
       const req = tx.objectStore(STORE).getAll();
       req.onsuccess = () => resolve((req.result as QueuedDeliveryMutation[]) || []);
-      req.onerror = () => reject(req.error);
-      tx.oncomplete = () => db.close();
+    req.onerror = () => reject(req.error);
+    tx.oncomplete = () => { /* db.close(); */ };
     });
-  } catch {
+  } catch (err) {
+    console.error('[OfflineSync] Failed to list queued mutations from IndexedDB:', err);
     return [];
   }
 }
@@ -74,7 +75,7 @@ export async function clearQueuedMutation(queueId: number): Promise<void> {
     const req = tx.objectStore(STORE).delete(queueId);
     req.onsuccess = () => resolve();
     req.onerror = () => reject(req.error);
-    tx.oncomplete = () => db.close();
+      tx.oncomplete = () => { /* db.close(); */ };
   });
 }
 
@@ -103,9 +104,15 @@ export async function flushOfflineQueue(): Promise<{ flushed: number; remaining:
       if (res.ok && m.queueId !== undefined) {
         await clearQueuedMutation(m.queueId);
         flushed += 1;
+      } else if (!res.ok) {
+        // Log non-OK responses as well, don't just break.
+        console.error(`[OfflineSync] Failed to flush mutation ${m.recordId}: Server responded with ${res.status}`);
       }
-    } catch {
-      break; // still offline — stop draining
+    } catch (err) {
+      console.error(`[OfflineSync] Error flushing mutation ${m.recordId}:`, err);
+      // Instead of breaking, consider logging and continuing, or implementing a more sophisticated retry strategy.
+      // For now, we'll continue to try other mutations.
+      // break; // Original behavior
     }
   }
   const remaining = (await listQueuedMutations()).length;
@@ -151,7 +158,7 @@ export async function queuePaymentIntent(intent: Omit<QueuedPaymentIntent, 'crea
     const store = tx.objectStore(PAYMENT_STORE);
     store.put({ ...intent, createdAt: new Date().toISOString() });
     tx.oncomplete = () => {
-      db.close();
+      // db.close();
       resolve();
     };
     tx.onerror = () => reject(tx.error);
@@ -166,9 +173,10 @@ export async function listQueuedPaymentIntents(): Promise<QueuedPaymentIntent[]>
       const req = tx.objectStore(PAYMENT_STORE).getAll();
       req.onsuccess = () => resolve((req.result as QueuedPaymentIntent[]) || []);
       req.onerror = () => reject(req.error);
-      tx.oncomplete = () => db.close();
+      tx.oncomplete = () => { /* db.close(); */ };
     });
-  } catch {
+  } catch (err) {
+    console.error('[OfflineSync] Failed to list queued payment intents from IndexedDB:', err);
     return [];
   }
 }
@@ -180,7 +188,7 @@ export async function clearQueuedPaymentIntent(id: string): Promise<void> {
     const req = tx.objectStore(PAYMENT_STORE).delete(id);
     req.onsuccess = () => resolve();
     req.onerror = () => reject(req.error);
-    tx.oncomplete = () => db.close();
+    tx.oncomplete = () => { /* db.close(); */ };
   });
 }
 
@@ -196,9 +204,12 @@ export async function syncWhenOnline(): Promise<void> {
       });
       if (res.ok) {
         await clearQueuedPaymentIntent(intent.id);
+      } else if (!res.ok) {
+        console.error(`[OfflineSync] Failed to sync payment intent ${intent.id}: Server responded with ${res.status}`);
       }
-    } catch {
-      break;
+    } catch (err) {
+      console.error(`[OfflineSync] Error syncing payment intent ${intent.id}:`, err);
+      // Continue to try other intents
     }
   }
   await flushOfflineQueue();
@@ -206,7 +217,7 @@ export async function syncWhenOnline(): Promise<void> {
 
 if (typeof window !== 'undefined') {
   window.addEventListener('online', () => {
-    syncWhenOnline().catch(() => undefined);
+    syncWhenOnline().catch((err) => console.error('[OfflineSync] syncWhenOnline error:', err));
   });
 }
 
@@ -216,7 +227,7 @@ if (typeof window !== 'undefined') {
 export function registerServiceWorker() {
   if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return;
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch(() => undefined);
+    navigator.serviceWorker.register('/sw.js').catch((err) => console.error('[OfflineSync] Service worker registration error:', err));
   });
 }
 

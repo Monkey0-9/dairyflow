@@ -4,9 +4,31 @@ import { query, transaction } from '@/lib/db';
 import { getLedgerRange } from '@/lib/services/delivery.service';
 import { publishEvent } from '@/lib/events';
 import { isTestMode, isUuid } from '@/lib/db-scope';
+import { randomUUID } from 'crypto';
 import { executeIdempotentOperation } from '@/lib/security/idempotency';
 import { DeliveryRecord } from '@/lib/types';
 import { getStore } from '@/lib/store';
+
+/**
+ * Maximum number of calendar days into the past that ADMIN/FARMER roles may
+ * directly modify a delivery record. Records older than this cutoff must go
+ * through the formal delivery-correction workflow (POST /api/delivery-corrections).
+ * SUPERADMIN is exempt from this window.
+ */
+const MODIFICATION_WINDOW_DAYS = 10; // 1–1.5 weeks
+
+/**
+ * Returns the ISO date string (YYYY-MM-DD) that is `days` calendar days ago
+ * relative to today in IST (UTC+5:30) so the cutoff makes sense for Indian ops.
+ */
+function getModificationCutoffDate(days: number = MODIFICATION_WINDOW_DAYS): string {
+  const now = new Date();
+  // Shift to IST before computing date boundary
+  const istOffsetMs = 5.5 * 60 * 60 * 1000;
+  const istNow = new Date(now.getTime() + istOffsetMs);
+  istNow.setDate(istNow.getDate() - days);
+  return istNow.toISOString().split('T')[0];
+}
 
 export async function GET(req: NextRequest) {
   const auth = authenticateRequest(req);
@@ -93,7 +115,7 @@ export async function GET(req: NextRequest) {
         scheduledQuantity: r.scheduledQuantity,
         deliveredQuantity: r.deliveredQuantity,
         pricePerUnit: r.pricePerUnit,
-        billableAmount: r.deliveredQuantity * r.pricePerUnit,
+        billableAmount: Math.round(r.deliveredQuantity * r.pricePerUnit * 100) / 100,
         status: r.status,
         deliveredAt: r.deliveredAt,
         markedBy: 'FARMER' as const,
@@ -212,6 +234,51 @@ export async function PATCH(req: NextRequest) {
           };
         }
       }
+      if (!row && body.customerId && body.date) {
+        // Auto-provision if customer exists in tenant
+        const custRes = await client.query(
+          `SELECT c.id, c.farmer_id, c.tenant_id, s.product_id, s.default_quantity,
+                  COALESCE(s.custom_price_per_unit, p.base_price, 50.0)::float as price_per_unit
+           FROM customer_profiles c
+           LEFT JOIN subscriptions s ON s.customer_id = c.id AND s.active = true
+           LEFT JOIN products p ON s.product_id = p.id
+           WHERE c.id = $1
+           LIMIT 1`,
+          [body.customerId]
+        );
+        if (custRes.rows.length > 0) {
+          const cust = custRes.rows[0];
+          const newId = recordId && isUuid(recordId) ? recordId : randomUUID();
+          const pId = isUuid(body.productId) ? body.productId : (cust.product_id || 'prod_cow_milk');
+          const schedQty = typeof body.scheduledQuantity === 'number' ? body.scheduledQuantity : (cust.default_quantity || 1.0);
+          const price = typeof body.pricePerUnit === 'number' ? body.pricePerUnit : (cust.price_per_unit || 50.0);
+          const initialStatus = status || 'DELIVERED';
+          let initialDeliveredQty = deliveredQuantity !== undefined ? parseFloat(deliveredQuantity) : schedQty;
+          if (initialStatus === 'SKIPPED' || initialStatus === 'NOT_DELIVERED') initialDeliveredQty = 0;
+          const ins = await client.query(
+            `INSERT INTO delivery_records (
+               id, tenant_id, customer_id, farmer_id, product_id, date,
+               scheduled_quantity, delivered_quantity, price_per_unit, status, notes, delivered_at, created_at, updated_at
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW(), NOW())
+             RETURNING id, tenant_id, customer_id, farmer_id, product_id, date,
+                       scheduled_quantity, delivered_quantity, price_per_unit, status, notes`,
+            [
+              newId,
+              cust.tenant_id || tenantId,
+              body.customerId,
+              cust.farmer_id || auth.user.farmerId,
+              pId,
+              body.date,
+              schedQty,
+              initialDeliveredQty,
+              price,
+              initialStatus,
+              notes ?? reason ?? null,
+            ]
+          );
+          if (ins.rows.length > 0) row = ins.rows[0];
+        }
+      }
       if (!row) {
         const err: any = new Error('Delivery record not found in database for this tenant.');
         err.status = 404;
@@ -226,6 +293,24 @@ export async function PATCH(req: NextRequest) {
         const err: any = new Error('Forbidden: Cross-tenant delivery access denied.');
         err.status = 403;
         throw err;
+      }
+
+      // ── Modification Window Enforcement ──────────────────────────────────────
+      // Only SUPERADMIN can bypass the rolling edit window.
+      // All other roles (ADMIN, FARMER, MANAGER, OWNER) can only edit records
+      // that are within MODIFICATION_WINDOW_DAYS calendar days of today.
+      if (!isTestMode() && auth.user.role !== 'SUPERADMIN') {
+        const cutoffDate = getModificationCutoffDate(MODIFICATION_WINDOW_DAYS);
+        if (row.date < cutoffDate) {
+          const err: any = new Error(
+            `Modification window exceeded: Records older than ${MODIFICATION_WINDOW_DAYS} days (before ${cutoffDate}) cannot be edited directly. ` +
+            `Please use the Delivery Correction workflow to adjust historical records.`
+          );
+          err.status = 403;
+          err.code = 'MODIFICATION_WINDOW_EXCEEDED';
+          err.cutoffDate = cutoffDate;
+          throw err;
+        }
       }
 
       // Check day-closing lock
@@ -263,7 +348,8 @@ export async function PATCH(req: NextRequest) {
           [finalStatus, finalQty, notes ?? reason ?? null, row.id, tenantId]
         );
         if (upd.rows.length > 0) updatedRow = upd.rows[0];
-      } catch {
+      } catch (dbErr) {
+        console.error('[ledger/PATCH] Failed to update delivery record in DB:', dbErr);
         if (!isTestMode()) throw new Error('Failed to update delivery record in database');
       }
 
@@ -295,7 +381,9 @@ export async function PATCH(req: NextRequest) {
             true
           );
         }
-      } catch { /* best effort */ }
+      } catch (storeErr) {
+        console.error('[ledger/PATCH] In-memory store mirror failed:', storeErr);
+      }
     }
 
     if (!isReplay) {
@@ -331,7 +419,12 @@ export async function PATCH(req: NextRequest) {
     const message = error instanceof Error ? error.message : 'Failed to update delivery';
     console.error('[Ledger API PATCH] durable write failed:', error);
     return NextResponse.json(
-      { success: false, error: message },
+      {
+        success: false,
+        error: message,
+        ...(error?.code && { code: error.code }),
+        ...(error?.cutoffDate && { cutoffDate: error.cutoffDate, modificationWindowDays: MODIFICATION_WINDOW_DAYS }),
+      },
       { status: typeof error?.status === 'number' ? error.status : 500 }
     );
   }

@@ -105,7 +105,7 @@ export default function AuditTrailViewer() {
   const filteredBlocks = blocks.filter((b) => {
     const matchesSearch =
       b.action.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      b.actor.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (b.actor?.name?.toLowerCase() || '').includes(searchQuery.toLowerCase()) ||
       b.entityId.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (b.reason?.toLowerCase() || '').includes(searchQuery.toLowerCase()) ||
       b.currentHash.toLowerCase().includes(searchQuery.toLowerCase());
@@ -328,8 +328,8 @@ export default function AuditTrailViewer() {
                     <div className="text-left sm:text-right">
                       <div className="text-xs font-semibold text-slate-800 flex items-center sm:justify-end gap-1">
                         <User className="w-3.5 h-3.5 text-slate-400" />
-                        <span>{block.actor.name}</span>
-                        <span className="text-[10px] text-slate-400 font-mono">({block.actor.role})</span>
+                        <span>{block.actor?.name || 'System'}</span>
+                        <span className="text-[10px] text-slate-400 font-mono">({block.actor?.role || 'SYSTEM'})</span>
                       </div>
                       <div className="text-[10px] text-slate-400 flex items-center sm:justify-end gap-1 mt-0.5 font-mono">
                         <Clock className="w-3 h-3" />

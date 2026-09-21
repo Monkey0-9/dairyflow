@@ -44,7 +44,12 @@ async function callAnthropic(question: string, facts: string, lang: string): Pro
     const data = (await res.json()) as { content?: { type: string; text?: string }[] };
     const text = data.content?.find((c) => c.type === 'text')?.text?.trim();
     return text || null;
-  } catch {
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      console.error('Anthropic API call timed out:', error);
+    } else {
+      console.error('Anthropic API call failed:', error);
+    }
     return null;
   }
 }
@@ -69,7 +74,12 @@ async function callGemini(question: string, facts: string, lang: string): Promis
     const data = (await res.json()) as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
     const text = data.candidates?.[0]?.content?.parts?.map((p) => p.text || '').join('').trim();
     return text || null;
-  } catch {
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      console.error('Gemini API call timed out:', error);
+    } else {
+      console.error('Gemini API call failed:', error);
+    }
     return null;
   }
 }

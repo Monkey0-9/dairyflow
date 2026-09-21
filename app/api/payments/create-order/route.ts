@@ -119,7 +119,13 @@ export async function POST(req: NextRequest) {
           orderStatus = live.status;
         }
       } catch (err) {
-        console.warn('[create-order] Live Razorpay order failed, falling back to simulated order:', err);
+        console.error('[create-order] Live Razorpay order creation failed:', err);
+        if (process.env.NODE_ENV === 'production') {
+          return NextResponse.json(
+            { success: false, error: 'Payment gateway temporarily unavailable. Please retry or use UPI payment directly.' },
+            { status: 502 }
+          );
+        }
       }
     }
 

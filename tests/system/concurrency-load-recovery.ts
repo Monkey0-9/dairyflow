@@ -1,10 +1,11 @@
 import { describe, it, expect, beforeAll } from 'vitest';
+import { LIVE_DB_TESTS_ENABLED } from '../setup';
 import { query, transaction } from '@/lib/db';
 import { getStore } from '@/lib/store';
 import { recalculateInvoice } from '@/lib/services/billing.service';
 import { processPayment } from '@/lib/services/payment.service';
 
-describe('Stages 9, 10 & 11: Performance, Concurrency & Failure Recovery', () => {
+describe.skipIf(!LIVE_DB_TESTS_ENABLED)('Stages 9, 10 & 11: Performance, Concurrency & Failure Recovery', () => {
   const runId = Date.now();
   const tenantId = `tenant_conc_${runId}`;
   const farmerId = `farmer_conc_${runId}`;

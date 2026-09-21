@@ -9,10 +9,11 @@ interface RateLimitBucket {
 }
 
 const cache = new Map<string, RateLimitBucket>();
+let rateLimitCleanupIntervalId: NodeJS.Timeout | undefined;
 
 // Periodic cleanup of stale buckets every 5 minutes
 if (typeof setInterval !== 'undefined') {
-  setInterval(() => {
+  rateLimitCleanupIntervalId = setInterval(() => {
     const now = Date.now();
     for (const [key, bucket] of cache.entries()) {
       if (bucket.resetAt <= now) {
@@ -85,4 +86,25 @@ export function checkRateLimit(
  */
 export function resetRateLimit(key: string): void {
   cache.delete(key);
+}
+
+/**
+ * Clear all rate-limit buckets from memory immediately.
+ */
+export function clearAllRateLimits(): void {
+  cache.clear();
+}
+
+/**
+ * Stops the periodic cleanup of stale rate limit buckets.
+ * This should be called if the module is being unloaded or if the application
+ * is shutting down to prevent resource leaks, especially in environments
+ * where modules might be dynamically reloaded (e.g., hot module replacement)
+ * or in serverless functions that might stay warm.
+ */
+export function stopRateLimiterCleanup(): void {
+  if (typeof clearInterval !== 'undefined' && rateLimitCleanupIntervalId) {
+    clearInterval(rateLimitCleanupIntervalId);
+    rateLimitCleanupIntervalId = undefined; // Clear the reference
+  }
 }

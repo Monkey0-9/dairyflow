@@ -47,6 +47,7 @@ export function MemberConcierge({
   // Extra Milk Form
   const [extraDate, setExtraDate] = useState('');
   const [extraQty, setExtraQty] = useState('1.0');
+  const [extraMilkType, setExtraMilkType] = useState('Cow');
   const [extraReason, setExtraReason] = useState('Dinner Party / Family Event');
 
   // Daily Quota / Allocation Tier Form
@@ -134,12 +135,13 @@ export function MemberConcierge({
           farmerId,
           date: extraDate,
           requestedQuantity: qty,
+          milkType: extraMilkType,
           reason: extraReason,
         }),
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        setActionSuccess('Extra milk request submitted to the estate concierge.');
+        setActionSuccess(`Extra ${extraMilkType} milk request submitted to the estate concierge.`);
         setTimeout(() => {
           handleClose();
           onRefresh();
@@ -279,14 +281,16 @@ export function MemberConcierge({
               {milkRequests.map((m) => (
                 <div key={m.id} className="py-3.5 flex items-center justify-between gap-4 text-xs">
                   <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 flex items-center justify-center font-bold">
+                    <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center font-bold">
                       <Sparkles className="w-4 h-4" />
                     </div>
                     <div>
-                      <div className="font-bold text-slate-900 dark:text-white">
+                      <div className="font-bold text-slate-900">
                         Extra Allocation: +{m.requestedQuantity} L on {m.date}
                       </div>
-                      <div className="text-[11px] text-slate-500">{m.reason || 'Event'}</div>
+                      <div className="text-[11px] text-slate-500 font-medium">
+                        <span className="font-semibold text-emerald-800">{m.milkType || 'Cow'} Milk</span> • {m.reason || 'Event'}
+                      </div>
                     </div>
                   </div>
                   <Badge variant={m.status === 'APPROVED' ? 'emerald' : m.status === 'REJECTED' ? 'danger' : 'warning'}>
@@ -354,7 +358,7 @@ export function MemberConcierge({
               variant="primary"
               isLoading={isSubmitting}
               className="flex-1"
-              rightIcon={<CheckCircle2 className="w-4 h-4" />}
+              rightIcon={<Calendar className="w-4 h-4" />}
             >
               Confirm Hold
             </Button>
@@ -362,12 +366,12 @@ export function MemberConcierge({
         </form>
       </Sheet>
 
-      {/* Sheet 2: Extra Milk */}
+      {/* Sheet 2: Extra Milk / Event Allocation */}
       <Sheet
         isOpen={activeSheet === 'extra'}
         onClose={handleClose}
-        title="Request Extra Estate Milk"
-        description="Order additional morning or evening bottles for entertaining guests or special occasions."
+        title="Request Additional Milk"
+        description="Schedule extra bottles for hosting, celebrations, or seasonal needs. Billed at standard estate rate on your monthly statement."
       >
         <form onSubmit={handleCreateExtra} className="space-y-4">
           {actionError && (
@@ -390,6 +394,38 @@ export function MemberConcierge({
             value={extraDate}
             onChange={(e) => setExtraDate(e.target.value)}
           />
+
+          {/* Milk Variety Option */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-bold text-slate-700">Select Milk Variety</label>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setExtraMilkType('Cow')}
+                className={`p-2.5 rounded-xl border text-xs font-bold transition flex items-center justify-between cursor-pointer ${
+                  extraMilkType === 'Cow'
+                    ? 'border-emerald-600 bg-emerald-50 text-emerald-950 ring-2 ring-emerald-500/20'
+                    : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                <span>🐄 Cow Milk (A2)</span>
+                {extraMilkType === 'Cow' && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setExtraMilkType('Buffalo')}
+                className={`p-2.5 rounded-xl border text-xs font-bold transition flex items-center justify-between cursor-pointer ${
+                  extraMilkType === 'Buffalo'
+                    ? 'border-emerald-600 bg-emerald-50 text-emerald-950 ring-2 ring-emerald-500/20'
+                    : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                <span>🐃 Buffalo Milk</span>
+                {extraMilkType === 'Buffalo' && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />}
+              </button>
+            </div>
+          </div>
 
           <Input
             label="Additional Quantity (Litres)"

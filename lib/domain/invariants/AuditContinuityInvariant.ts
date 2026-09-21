@@ -16,6 +16,10 @@ export interface AuditBlockInput {
 }
 
 export function computeAuditHash(b: Omit<AuditBlockInput, 'currentHash'>): string {
+  // Ensure consistent serialization for hashing: null/undefined states should be '{}' if they represent empty JSON objects.
+  const beforeStateSerialized = b.beforeState === null || b.beforeState === undefined ? '{}' : b.beforeState;
+  const afterStateSerialized = b.afterState === null || b.afterState === undefined ? '{}' : b.afterState;
+
   const payload = [
     b.index,
     b.timestamp,
@@ -24,8 +28,8 @@ export function computeAuditHash(b: Omit<AuditBlockInput, 'currentHash'>): strin
     b.entityType,
     b.entityId,
     b.action,
-    b.beforeState ?? '',
-    b.afterState ?? '',
+    beforeStateSerialized,
+    afterStateSerialized,
     b.previousHash,
   ].join('|');
   return createHash('sha256').update(payload).digest('hex');

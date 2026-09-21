@@ -32,6 +32,7 @@ import {
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import { CustomerProfile, Product, Subscription, Invoice, AccountStatus } from '@/lib/types';
+import ManualPaymentModal from '@/components/common/ManualPaymentModal';
 
 interface CustomerWithSub extends CustomerProfile {
   subscription?: Subscription;
@@ -41,6 +42,7 @@ interface CustomerWithSub extends CustomerProfile {
 interface CustomerManagementProps {
   customers: CustomerWithSub[];
   products: Product[];
+  invoices?: Invoice[];
   onAddCustomer: (data: any) => Promise<any>;
   onDeleteCustomer?: (customerId: string) => Promise<any>;
   onRefresh: () => void;
@@ -49,6 +51,7 @@ interface CustomerManagementProps {
 export default function CustomerManagement({
   customers,
   products,
+  invoices = [],
   onAddCustomer,
   onDeleteCustomer,
   onRefresh,
@@ -63,6 +66,37 @@ export default function CustomerManagement({
   const [selectedCust360, setSelectedCust360] = useState<CustomerWithSub | null>(null);
   const [customerToDelete, setCustomerToDelete] = useState<CustomerWithSub | null>(null);
   const [editingCustomer, setEditingCustomer] = useState<CustomerWithSub | null>(null);
+  const [paymentCustomer, setPaymentCustomer] = useState<CustomerWithSub | null>(null);
+  const [paymentInvoice, setPaymentInvoice] = useState<Invoice | null>(null);
+
+  const handleOpenManualPayment = (cust: CustomerWithSub) => {
+    const inv: Invoice = cust.currentInvoice || invoices?.find((i) => i.customerId === cust.id) || {
+      id: `inv_manual_${cust.id}`,
+      tenantId: cust.tenantId || 'tenant_main',
+      farmerId: cust.farmerId || 'farmer_primary',
+      invoiceNumber: `INV-${new Date().getFullYear()}${String(new Date().getMonth() + 1).padStart(2, '0')}-${cust.customerCode || '001'}`,
+      customerId: cust.id,
+      customerName: cust.name,
+      customerPhone: cust.phone,
+      customerAddress: cust.address || '',
+      month: new Date().getMonth() + 1,
+      monthName: new Date().toLocaleString('en-IN', { month: 'long', year: 'numeric' }),
+      year: new Date().getFullYear(),
+      items: [],
+      totalQuantity: cust.subscription?.defaultQuantity ? cust.subscription.defaultQuantity * 30 : 30,
+      subtotal: (cust.subscription?.defaultQuantity || 1) * (cust.subscription?.customPricePerUnit || 50) * 30,
+      extraCharges: 0,
+      creditsOrAdjustments: 0,
+      totalAmount: (cust.subscription?.defaultQuantity || 1) * (cust.subscription?.customPricePerUnit || 50) * 30,
+      paidAmount: 0,
+      outstandingAmount: (cust.subscription?.defaultQuantity || 1) * (cust.subscription?.customPricePerUnit || 50) * 30,
+      status: 'UNPAID',
+      dueDate: new Date(Date.now() + 5 * 86400000).toISOString().split('T')[0],
+      generatedAt: new Date().toISOString(),
+    };
+    setPaymentCustomer(cust);
+    setPaymentInvoice(inv);
+  };
   const [createdCredentials, setCreatedCredentials] = useState<{
     name: string;
     email: string;
@@ -834,24 +868,35 @@ export default function CustomerManagement({
                 </div>
 
                 {/* Card Action Footer */}
-                <div className="mt-3.5 pt-2.5 border-t border-slate-100">
+                <div className="mt-3.5 pt-2.5 border-t border-slate-100 flex items-center gap-2">
                   {isPending ? (
                     <button
                       onClick={() => handleApproveCustomer(c.id)}
                       disabled={actionLoadingId === c.id}
-                      className="w-full py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition active:scale-[0.98] cursor-pointer"
+                      className="w-full py-2 rounded-xl bg-linear-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition active:scale-[0.98] cursor-pointer"
                     >
                       <CheckCircle2 className="w-4 h-4" />
                       <span>{actionLoadingId === c.id ? 'Approving...' : 'Approve & Activate Delivery'}</span>
                     </button>
                   ) : (
-                    <button
-                      onClick={() => setSelectedCust360(c)}
-                      className="w-full py-2 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200/80 text-slate-800 font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-[0.98] cursor-pointer group-hover:border-slate-300"
-                    >
-                      <span>Customer 360 Dossier</span>
-                      <ChevronRight className="w-3.5 h-3.5 text-slate-400 group-hover:translate-x-0.5 transition-transform" />
-                    </button>
+                    <>
+                      <button
+                        onClick={() => setSelectedCust360(c)}
+                        className="flex-1 py-2 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200/80 text-slate-800 font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-[0.98] cursor-pointer group-hover:border-slate-300"
+                      >
+                        <span>Customer 360</span>
+                        <ChevronRight className="w-3.5 h-3.5 text-slate-400 group-hover:translate-x-0.5 transition-transform" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleOpenManualPayment(c)}
+                        className="py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition active:scale-[0.98] cursor-pointer"
+                        title="Record manual UPI or Cash payment for this client"
+                      >
+                        <CreditCard className="w-3.5 h-3.5" />
+                        <span>Pay</span>
+                      </button>
+                    </>
                   )}
                 </div>
               </div>
@@ -978,7 +1023,16 @@ export default function CustomerManagement({
                             className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-[11px] transition cursor-pointer"
                             title="Customer 360"
                           >
-                            360 Dossier
+                            360
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenManualPayment(c)}
+                            className="px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 font-bold text-[11px] transition cursor-pointer flex items-center gap-1"
+                            title="Record manual UPI or Cash payment for this client"
+                          >
+                            <CreditCard className="w-3 h-3" />
+                            <span>Pay</span>
                           </button>
                           <button
                             onClick={() => handleStartEditCustomer(c)}
@@ -1737,6 +1791,26 @@ export default function CustomerManagement({
             </form>
           </div>
         </div>
+      )}
+
+      {/* Manual Payment Settlement Modal */}
+      {paymentCustomer && paymentInvoice && (
+        <ManualPaymentModal
+          isOpen={true}
+          onClose={() => {
+            setPaymentCustomer(null);
+            setPaymentInvoice(null);
+          }}
+          customerName={paymentCustomer.name}
+          customerPhone={paymentCustomer.phone}
+          customerCode={paymentCustomer.customerCode}
+          invoiceId={paymentInvoice.id}
+          invoiceNumber={paymentInvoice.invoiceNumber}
+          outstandingAmount={paymentInvoice.outstandingAmount || 0}
+          onPaymentSuccess={async () => {
+            await onRefresh();
+          }}
+        />
       )}
     </div>
   );
