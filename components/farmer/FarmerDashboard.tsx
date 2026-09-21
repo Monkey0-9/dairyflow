@@ -817,9 +817,11 @@ export default function FarmerDashboard({
                   <button
                     type="button"
                     onClick={() => {
-                      setCustomQty(Math.max(0, parseFloat((customQty - 0.5).toFixed(1))));
-                      if (customQty - 0.5 === 0) setCustomStatus('SKIPPED');
-                      else if (customQty - 0.5 < editingRecord.scheduledQuantity) setCustomStatus('PARTIAL');
+                      const newQty = Math.max(0, parseFloat((customQty - 0.5).toFixed(1)));
+                      setCustomQty(newQty);
+                      if (newQty === 0) setCustomStatus('SKIPPED');
+                      else if (newQty < editingRecord.scheduledQuantity) setCustomStatus('PARTIAL');
+                      else setCustomStatus('DELIVERED');
                     }}
                     className="w-10 h-10 rounded-xl border border-slate-200 bg-slate-50 font-bold text-base hover:bg-slate-100 text-slate-700 flex items-center justify-center"
                   >
@@ -844,8 +846,9 @@ export default function FarmerDashboard({
                   <button
                     type="button"
                     onClick={() => {
-                      setCustomQty(parseFloat((customQty + 0.5).toFixed(1)));
-                      if (customQty + 0.5 > editingRecord.scheduledQuantity) setCustomStatus('EXTRA');
+                      const newQty = parseFloat((customQty + 0.5).toFixed(1));
+                      setCustomQty(newQty);
+                      if (newQty > editingRecord.scheduledQuantity) setCustomStatus('EXTRA');
                       else setCustomStatus('DELIVERED');
                     }}
                     className="w-10 h-10 rounded-xl border border-slate-200 bg-slate-50 font-bold text-base hover:bg-slate-100 text-slate-700 flex items-center justify-center"

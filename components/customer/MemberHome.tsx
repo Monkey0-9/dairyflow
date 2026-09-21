@@ -49,7 +49,7 @@ export function MemberHome({
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-100 dark:border-slate-800 pb-5">
           <div>
             <div className="flex items-center gap-2 mb-2">
-              <Badge variant="live" dot size="sm">{customer.customerCode || 'MK-1021'}</Badge>
+              <Badge variant="live" dot size="sm">{customer.customerCode || 'N/A'}</Badge>
               <span className="text-[10px] text-slate-400 dark:text-slate-500 font-medium">Active Allocation</span>
             </div>
             <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
@@ -90,7 +90,7 @@ export function MemberHome({
               {subscription?.defaultQuantity || 1.0} <span className="text-xs font-normal text-slate-400">L</span>
             </div>
             <div className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium mt-0.5">
-              {subscription?.productName || 'Farm Fresh Cow Milk'}
+              {subscription?.productName || 'Standard Milk'}
             </div>
           </div>
 

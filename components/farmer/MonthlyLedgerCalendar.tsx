@@ -200,11 +200,55 @@ export default function MonthlyLedgerCalendar({
   };
 
   const handleGoToday = () => {
-    // September 2026 matches seed system date
-    setSelectedYear(2026);
-    setSelectedMonth(9);
-    openDayDetails('2026-09-20');
+    // Use dynamic current date instead of hardcoded 2026-09-20
+    const today = new Date();
+    setSelectedYear(today.getFullYear());
+    setSelectedMonth(today.getMonth() + 1);
+    openDayDetails(today.toISOString().split('T')[0]);
   };
+
+  // Helper to get current week dates (Monday to Sunday)
+  const getCurrentWeekDates = useCallback(() => {
+    const now = new Date();
+    const dayOfWeek = now.getDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+    const monday = new Date(now);
+    // If today is Sunday (0), go back to previous Monday
+    monday.setDate(now.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1));
+    if (monday.getDay() !== 1) {
+      // Adjust to Monday
+      monday.setDate(monday.getDate() - monday.getDay() + 1);
+    }
+    
+    const dates: string[] = [];
+    for (let i = 0; i < 7; i++) {
+      const date = new Date(monday);
+      date.setDate(monday.getDate() + i);
+      dates.push(date.toISOString().split('T')[0]);
+    }
+    return dates;
+  }, []);
+
+  // Helper to format week range for display
+  const formatWeekRange = useCallback((dates: string[]) => {
+    if (dates.length === 0) return '';
+    const start = new Date(dates[0]);
+    const end = new Date(dates[dates.length - 1]);
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const startMonth = monthNames[start.getMonth()];
+    const endMonth = monthNames[end.getMonth()];
+    const startDate = start.getDate();
+    const endDate = end.getDate();
+    const startYear = start.getFullYear();
+    const endYear = end.getFullYear();
+    
+    if (startMonth === endMonth && startYear === endYear) {
+      return `${startDate} ${startMonth} – ${endDate} ${endMonth} ${endYear}`;
+    }
+    if (startYear === endYear) {
+      return `${startDate} ${startMonth} – ${endDate} ${endMonth} ${endYear}`;
+    }
+    return `${startDate} ${startMonth} ${startYear} – ${endDate} ${endMonth} ${endYear}`;
+  }, []);
 
   // Helper to compute planned vs actual delivery plan for a single date
   const computeDayCustomerPlans = useCallback(
@@ -744,7 +788,8 @@ export default function MonthlyLedgerCalendar({
               }
 
               const dStr = item.dateStr;
-              const isToday = dStr === '2026-09-20'; // Current system anchor date
+              const todayStr = new Date().toISOString().split('T')[0];
+              const isToday = dStr === todayStr;
               const recs = monthCache[dStr] || [];
 
               // Calculate day volume
@@ -875,7 +920,7 @@ export default function MonthlyLedgerCalendar({
               </p>
             </div>
             <span className="text-xs font-mono font-bold text-emerald-800 bg-emerald-50 px-3 py-1 rounded-xl border border-emerald-200">
-              15 Sep – 21 Sep 2026
+              {formatWeekRange(getCurrentWeekDates())}
             </span>
           </div>
 
@@ -883,24 +928,24 @@ export default function MonthlyLedgerCalendar({
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50 text-[11px] font-black text-slate-500 uppercase tracking-wider">
                 <th className="py-3 px-4">Client</th>
-                <th className="py-3 px-3 text-center">Mon (15)</th>
-                <th className="py-3 px-3 text-center">Tue (16)</th>
-                <th className="py-3 px-3 text-center">Wed (17)</th>
-                <th className="py-3 px-3 text-center">Thu (18)</th>
-                <th className="py-3 px-3 text-center">Fri (19)</th>
-                <th className="py-3 px-3 text-center bg-emerald-50 text-emerald-800 font-black">
-                  Sat (20) Today
-                </th>
-                <th className="py-3 px-3 text-center">Sun (21)</th>
+                {getCurrentWeekDates().map((dateStr, index) => {
+                  const date = new Date(dateStr);
+                  const dayName = date.toLocaleDateString('en-US', { weekday: 'short' });
+                  const dayNum = date.getDate();
+                  const todayStr = new Date().toISOString().split('T')[0];
+                  const isToday = dateStr === todayStr;
+                  return (
+                    <th key={dateStr} className={`py-3 px-3 text-center ${isToday ? 'bg-emerald-50 text-emerald-800 font-black' : ''}`}>
+                      {dayName} ({dayNum}){isToday ? ' Today' : ''}
+                    </th>
+                  );
+                })}
                 <th className="py-3 px-4 text-right">Week Total</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs">
               {filteredCustomers.map((cust) => {
-                const weekDates = [
-                  '2026-09-15', '2026-09-16', '2026-09-17',
-                  '2026-09-18', '2026-09-19', '2026-09-20', '2026-09-21',
-                ];
+                const weekDates = getCurrentWeekDates();
 
                 let customerWeekTotal = 0;
 

@@ -115,10 +115,15 @@ export async function POST(req: NextRequest) {
           if (invRes.rows.length === 0) {
             const custId = body.customerId || session?.customerId;
             if (custId) {
+              // FR-PAY-005: Always filter by customer AND tenant to prevent paying wrong invoice
+              // ORDER BY year DESC, month DESC picks the most recent invoice for this customer
+              const tenantFilter = session?.tenantId ? `AND tenant_id = $2` : '';
+              const params: unknown[] = [custId];
+              if (session?.tenantId) params.push(session.tenantId);
               invRes = await query(
                 `SELECT id, customer_id as "customerId", farmer_id as "farmerId", tenant_id as "tenantId"
-                 FROM invoices WHERE customer_id = $1 ORDER BY year DESC, month DESC LIMIT 1`,
-                [custId]
+                 FROM invoices WHERE customer_id = $1 ${tenantFilter} ORDER BY year DESC, month DESC LIMIT 1`,
+                params
               );
             }
           }

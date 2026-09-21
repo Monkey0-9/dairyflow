@@ -351,10 +351,11 @@ export default function AdminPage() {
     );
 
     try {
+      // Send notificationId only; backend should infer userId from session cookies
       await apiMutate('/api/notifications', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ notificationId: id, userId: 'user_farmer' }),
+        body: JSON.stringify({ notificationId: id }),
       });
       setSaveError(null);
     } catch (err) {
@@ -436,7 +437,9 @@ export default function AdminPage() {
       {/* Top Navbar */}
       <Navbar
         currentRole="FARMER"
-        currentUserId="user_farmer"
+        // currentUserId should be fetched from session; for now using empty string
+        // as the actual user ID is not available in this component
+        currentUserId=""
         selectedDate={selectedDate}
         onDateChange={setSelectedDate}
         activeTab={activeTab}

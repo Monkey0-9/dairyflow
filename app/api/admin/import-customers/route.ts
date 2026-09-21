@@ -110,6 +110,10 @@ export async function POST(req: NextRequest) {
         );
 
         // 2. Create Customer Profile in INVITED state
+        // SEC-015: Customers created via bulk import are in INVITED state with is_active=false
+        // and a cryptographically unmatchable password hash. They MUST activate their account
+        // via the invitation token sent to them before they can log in. Never set is_active=true
+        // or use a guessable password in this path.
         await client.query(
           `INSERT INTO customer_profiles (id, user_id, tenant_id, farmer_id, delivery_address, milk_type, daily_quantity, qr_token, is_active, status, created_at, updated_at)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false, 'INVITED', NOW(), NOW())`,

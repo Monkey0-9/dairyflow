@@ -13,13 +13,17 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const [kpis, tenants, farmers, customers, auditStatus] = await Promise.all([
+    const [kpis, tenants, farmers, customers] = await Promise.all([
       getPlatformKPIs(),
       getPlatformTenants(),
       getPlatformFarmers(),
       getAllCustomersPlatform(),
-      verifyAuditChain('tenant_greenvalley'),
     ]);
+    
+    // Verify audit chain for first available tenant (or skip if none)
+    const auditStatus = tenants.length > 0 
+      ? await verifyAuditChain(tenants[0].id)
+      : { valid: true, totalBlocks: 0, reason: 'No tenants available' };
 
     // Recent platform payments
     const payRes = await query(

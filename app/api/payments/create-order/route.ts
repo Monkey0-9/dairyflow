@@ -126,6 +126,8 @@ export async function POST(req: NextRequest) {
             { status: 502 }
           );
         }
+        // In non-production: fall back to sandbox UPI intent, but log that live creation failed
+        console.warn('[create-order] Falling back to sandbox mode after live Razorpay failure');
       }
     }
 

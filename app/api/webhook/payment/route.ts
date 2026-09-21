@@ -20,13 +20,14 @@ export async function POST(req: NextRequest) {
     }
     const rawBody = await req.text();
     const signature = req.headers.get('x-razorpay-signature') || req.headers.get('x-webhook-signature');
-    // Test fallback secret mirrors test suites; production strictly requires RAZORPAY_WEBHOOK_SECRET
-    const secret = process.env.RAZORPAY_WEBHOOK_SECRET || (isTestMode() && process.env.NODE_ENV !== 'production' ? 'whsec_milkflow_prod_demo_key_9812' : undefined);
+    // SEC-013: Always require RAZORPAY_WEBHOOK_SECRET from environment; never use hardcoded fallbacks
+    const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
 
     // FR-PAY-003/004 + SEC-013: fail closed when secret missing (all envs except unit tests).
     if (!secret) {
-      if (isTestMode() && process.env.NODE_ENV !== 'production') {
-        // unit tests exercise idempotency without live secrets
+      if (isTestMode()) {
+        // Unit tests exercise idempotency without live secrets - this is safe because
+        // test mode skips signature verification entirely (see line 38-44)
       } else {
         return NextResponse.json(
           { success: false, error: 'Server misconfigured: RAZORPAY_WEBHOOK_SECRET missing.' },

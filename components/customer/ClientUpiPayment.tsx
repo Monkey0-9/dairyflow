@@ -53,10 +53,10 @@ export function ClientUpiPayment({
   const selectedInvoice = invoices.find((i) => i.id === selectedInvoiceId) || dueInvoices[0] || invoices[0];
   const invoiceBalance = selectedInvoice
     ? Math.max(0, selectedInvoice.totalAmount - (selectedInvoice.paidAmount || 0))
-    : 1500;
+    : 0;
 
   const [paymentAmount, setPaymentAmount] = useState<string>(() => {
-    return invoiceBalance > 0 ? String(invoiceBalance) : '1500';
+    return invoiceBalance > 0 ? String(invoiceBalance) : String(invoiceBalance);
   });
 
   const [paymentMode, setPaymentMode] = useState<string>('UPI_PHONEPE');
@@ -74,7 +74,7 @@ export function ClientUpiPayment({
       if (active) {
         setSelectedInvoiceId(active.id);
         const bal = Math.max(0, active.totalAmount - (active.paidAmount || 0));
-        setPaymentAmount(String(bal > 0 ? bal : (active.totalAmount || 1500)));
+        setPaymentAmount(String(bal > 0 ? bal : (active.totalAmount || 0)));
       }
     }
   }, [invoices, dueInvoices, selectedInvoiceId]);
@@ -84,7 +84,7 @@ export function ClientUpiPayment({
     const amt = parseFloat(paymentAmount) || invoiceBalance || 0;
     const upiUri = `upi://pay?pa=${upiId}&pn=${encodeURIComponent(
       payeeName
-    )}&am=${amt > 0 ? amt.toFixed(2) : '1500.00'}&cu=INR&tn=${encodeURIComponent(
+    )}&am=${amt > 0 ? amt.toFixed(2) : '0.00'}&cu=INR&tn=${encodeURIComponent(
       `MilkBill-${selectedInvoice?.invoiceNumber || customer.customerCode || 'MK-001'}`
     )}`;
 
@@ -120,7 +120,7 @@ export function ClientUpiPayment({
     }
 
     const targetInvoice = selectedInvoice || invoices[0];
-    const targetInvoiceId = targetInvoice?.id || (selectedInvoiceId !== 'CURRENT_CYCLE' ? selectedInvoiceId : '') || 'inv_ram_202609';
+    const targetInvoiceId = targetInvoice?.id || (selectedInvoiceId !== 'CURRENT_CYCLE' ? selectedInvoiceId : '') || '';
 
     const amt = parseFloat(paymentAmount);
     if (!amt || amt <= 0) {
@@ -307,7 +307,7 @@ export function ClientUpiPayment({
             <a
               href={`upi://pay?pa=${upiId}&pn=${encodeURIComponent(
                 payeeName
-              )}&am=${parseFloat(paymentAmount) || 1500}&cu=INR`}
+              )}&am=${parseFloat(paymentAmount) || 0}&cu=INR`}
               className="w-full py-2.5 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs flex items-center justify-center gap-2 transition"
             >
               <span>Open in PhonePe / UPI App</span>
@@ -344,14 +344,14 @@ export function ClientUpiPayment({
                     const inv = invoices.find((i) => i.id === e.target.value);
                     if (inv) {
                       const bal = Math.max(0, inv.totalAmount - (inv.paidAmount || 0));
-                      setPaymentAmount(String(bal > 0 ? bal : inv.totalAmount || 1500));
+                      setPaymentAmount(String(bal > 0 ? bal : inv.totalAmount || 0));
                     }
                   }}
                   className="w-full pl-3.5 pr-9 py-2.5 text-xs font-semibold rounded-xl border border-slate-300 bg-white hover:border-slate-400 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/20 focus:outline-none transition text-slate-900 appearance-none cursor-pointer shadow-xs"
                 >
                   {invoices.length === 0 ? (
                     <option value="CURRENT_CYCLE">
-                      Current Billing Statement (Sept 2026) • ₹1,500.00 (Due)
+                      Current Billing Statement • ₹0.00 (No invoices found)
                     </option>
                   ) : (
                     <>
@@ -383,7 +383,7 @@ export function ClientUpiPayment({
                 step="0.01"
                 value={paymentAmount}
                 onChange={(e) => setPaymentAmount(e.target.value)}
-                placeholder="1500"
+                placeholder="Enter amount"
                 className="w-full px-3 py-2 text-sm font-bold rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:outline-none focus:border-emerald-500 text-slate-900"
                 required
               />

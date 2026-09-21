@@ -6,6 +6,7 @@ import { getStore } from '@/lib/store';
 
 // FR-AUD-004/005: verify the hash-linked chain in PostgreSQL for the caller's tenant.
 export async function GET(req?: NextRequest) {
+  // SEC-016: WARNING - Test mode bypasses authentication. This is NOT safe for production.
   // Unit-test compatibility: legacy tests call GET() with no request.
   if (!req) {
     if (isTestMode()) {

@@ -464,7 +464,11 @@ export default function AdminProfilePage() {
               </div>
               <button
                 type="button"
-                onClick={() => alert('Other sessions revoked.')}
+                onClick={async () => {
+                  // TODO: Implement actual backend call to revoke other sessions
+                  // For now, show alert that this feature needs to be implemented
+                  alert('Feature coming soon: This will revoke all other active sessions for this user.');
+                }}
                 className="px-3 py-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition text-xs font-semibold"
               >
                 Log Out Others

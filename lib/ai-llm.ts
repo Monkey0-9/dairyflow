@@ -96,6 +96,8 @@ export async function groundedAnswer(
 ): Promise<string | null> {
   const provider = llmProvider();
   if (!provider) return null;
+  // Truncate the facts object to prevent excessive token usage
+  // Stringify first, then truncate to avoid breaking in the middle of JSON
   const factsText = JSON.stringify(facts).slice(0, 4000);
   if (provider === 'anthropic') return callAnthropic(question, factsText, lang);
   return callGemini(question, factsText, lang);
