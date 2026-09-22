@@ -4,17 +4,18 @@ import 'dotenv/config';
 
 // Isolated test runs use a separate database when provided, so live-DB
 // suites never accidentally target production (SRS §21).
-const connectionString = process.env.TEST_DATABASE_URL || process.env.DATABASE_URL;
-
-if (!connectionString) {
-  const errorMessage = '[FATAL CONFIGURATION ERROR] DATABASE_URL is not set in environment variables.';
-  if (process.env.NODE_ENV === 'production') {
-    throw new Error(errorMessage);
-  } else {
-    console.error(errorMessage + ' Application will likely fail if DB operations are attempted.');
-    // Optionally, you might want to throw here even in dev if DB is critical
-    // throw new Error(errorMessage);
+function requireConnectionString(): string {
+  const connectionString = process.env.TEST_DATABASE_URL || process.env.DATABASE_URL;
+  if (!connectionString) {
+    const errorMessage = '[FATAL CONFIGURATION ERROR] DATABASE_URL is not set in environment variables.';
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error(errorMessage);
+    } else {
+      console.error(errorMessage + ' Application will likely fail if DB operations are attempted.');
+    }
+    return '';
   }
+  return connectionString;
 }
 
 // Global pool instance with connection pooling optimized for Neon / Serverless
@@ -35,8 +36,11 @@ export function getPool(): Pool {
     const sslOverride = process.env.PG_SSL_REJECT_UNAUTHORIZED;
     const rejectUnauthorized =
       sslOverride === 'true' ? true : sslOverride === 'false' ? false : false;
+    // Resolved lazily (not at module load) so `next build` page-data
+    // collection can import this module without runtime secrets present.
+    // In production the fail-fast throw still fires on first DB use.
     pool = new Pool({
-      connectionString: process.env.TEST_DATABASE_URL || process.env.DATABASE_URL,
+      connectionString: requireConnectionString() || undefined,
       ssl: {
         rejectUnauthorized,
       },
