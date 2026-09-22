@@ -19,10 +19,12 @@ export function authorizeCron(req: NextRequest): NextResponse | null {
   }
   const header = req.headers.get('authorization')?.replace(/^Bearer\s+/i, '');
   const param = new URL(req.url).searchParams.get('secret');
-  const isTestOrDev = process.env.NODE_ENV !== 'production' || process.env.VITEST === 'true' || process.env.TEST_ENV === 'unit';
 
-  // SEC-014: user-agent is spoofable; only accept Bearer token or query param
-  if (header !== secret && param !== secret && !isTestOrDev) {
+  // Fail-closed: a configured secret must match exactly. Wrong or missing
+  // credentials are rejected in every environment — user-agent strings are
+  // spoofable so only the Bearer token or ?secret= param authorize.
+  // (Manual/local invocation passes ?secret=<CRON_SECRET>.)
+  if (header !== secret && param !== secret) {
     return NextResponse.json({ success: false, error: 'Unauthorized cron caller' }, { status: 401 });
   }
   return null;

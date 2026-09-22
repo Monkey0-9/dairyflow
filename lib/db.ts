@@ -27,11 +27,18 @@ export function getPool(): Pool {
     // Serverless-safe defaults: small pool, fast recycle. Use the Neon
     // pooled (pooler) connection string in production (see .env.example).
     // Override with PG_POOL_MAX when a dedicated larger pool is provisioned.
+    // SSL: Neon requires TLS. `rejectUnauthorized` defaults to false for
+    // Neon compatibility (managed certs via pooler) but can be hardened to
+    // `true` with `PG_SSL_REJECT_UNAUTHORIZED=true` when the DATABASE_URL
+    // uses `sslmode=verify-full` with a verifiable CA chain.
     const max = Number(process.env.PG_POOL_MAX || (isServerless ? 3 : 10));
+    const sslOverride = process.env.PG_SSL_REJECT_UNAUTHORIZED;
+    const rejectUnauthorized =
+      sslOverride === 'true' ? true : sslOverride === 'false' ? false : false;
     pool = new Pool({
       connectionString: process.env.TEST_DATABASE_URL || process.env.DATABASE_URL,
       ssl: {
-        rejectUnauthorized: false, // Required for Neon SSL connection
+        rejectUnauthorized,
       },
       max: Number.isFinite(max) && max > 0 ? max : 3,
       idleTimeoutMillis: 10000,

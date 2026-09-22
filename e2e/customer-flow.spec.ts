@@ -11,8 +11,8 @@ test.describe('Client Creation & Client Login E2E', () => {
     // Step 1: Log in as Farmer to create a client via API endpoint
     const loginRes = await request.post('/api/auth/login', {
       data: {
-        userIdentifier: 'prakashpraveen239@gmail.com',
-        password: 'Abc@1234',
+        identifier: process.env.E2E_FARMER_EMAIL || 'prakashpraveen239@gmail.com',
+        password: process.env.E2E_FARMER_PASSWORD || 'Abc@1234',
       },
     });
     expect(loginRes.status()).toBe(200);
@@ -37,12 +37,8 @@ test.describe('Client Creation & Client Login E2E', () => {
     expect(createData.credentials.phone).toBe(testPhone);
 
     // Step 3: Test Browser UI Login as the new client using PHONE NUMBER
+    // Login page is a single credentials form (#login-identifier / #login-password).
     await page.goto('/login');
-    // Handle demo mode: click Credentials tab if present
-    const credTab = page.locator('#tab-credentials');
-    if (await credTab.isVisible()) {
-      await credTab.click();
-    }
     await page.locator('#login-identifier').fill(testPhone);
     await page.locator('#login-password').fill(testPassword);
     await page.locator('button[type="submit"]').first().click();
@@ -59,10 +55,6 @@ test.describe('Client Creation & Client Login E2E', () => {
     // Step 5: Test Client Login using EMAIL
     await page.context().clearCookies();
     await page.goto('/login');
-    const credTab2 = page.locator('#tab-credentials');
-    if (await credTab2.isVisible()) {
-      await credTab2.click();
-    }
     await page.locator('#login-identifier').fill(testEmail);
     await page.locator('#login-password').fill(testPassword);
     await page.locator('button[type="submit"]').first().click();

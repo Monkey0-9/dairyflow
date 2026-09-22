@@ -16,9 +16,11 @@ export default function ClientPortalPageWrapper({ initialTab }: ClientPortalPage
   const [currentUser, setCurrentUser] = useState<{ id?: string; userId?: string; role?: string } | null>(null);
   const [customers, setCustomers] = useState<CustomerProfile[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     try {
+      setLoadError(null);
       const meRes = await fetch('/api/auth/me');
       const meData = await meRes.json();
       if (!meData.authenticated) {
@@ -31,9 +33,12 @@ export default function ClientPortalPageWrapper({ initialTab }: ClientPortalPage
       const custData = await custRes.json();
       if (custData.success) {
         setCustomers(custData.customers);
+      } else {
+        setLoadError(custData.error || 'Failed to load client records.');
       }
     } catch (err) {
       console.error('Failed to load client data', err);
+      setLoadError('Failed to load client records. Please try refreshing.');
     } finally {
       setLoading(false);
     }
@@ -42,6 +47,11 @@ export default function ClientPortalPageWrapper({ initialTab }: ClientPortalPage
   useEffect(() => {
     void loadData();
   }, [loadData]);
+
+  // Session-derived identity only — never fall back to a hardcoded demo id.
+  // An empty id renders the "provisioning" empty state instead of leaking
+  // another client's allocation.
+  const resolvedUserId = currentUser?.userId || currentUser?.id || '';
 
   if (loading) {
     return (
@@ -103,26 +113,58 @@ export default function ClientPortalPageWrapper({ initialTab }: ClientPortalPage
               Concierge
             </Link>
             <Link
-              href="/customer/qr"
+              href="/customer/payment"
               className={`text-xs px-2.5 py-1 rounded-lg font-medium transition ${
-                initialTab === 'PAYMENT' || initialTab === 'QR'
+                initialTab === 'PAYMENT'
                   ? 'bg-slate-900 text-white'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              Pay via UPI / QR
+              Pay via UPI
+            </Link>
+            <Link
+              href="/customer/qr"
+              className={`text-xs px-2.5 py-1 rounded-lg font-medium transition ${
+                initialTab === 'QR'
+                  ? 'bg-slate-900 text-white'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              QR Token
             </Link>
           </div>
         </div>
       </header>
 
       <main className="max-w-5xl mx-auto px-4 sm:px-6 py-6">
-        <CustomerPortal
-          currentUserId={currentUser?.userId || currentUser?.id || 'cust_1'}
-          customers={customers}
-          onRefreshAll={() => void loadData()}
-          initialTab={initialTab}
-        />
+        {loadError && (
+          <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs text-rose-800" role="alert">
+            <span className="font-bold">Couldn&apos;t load your allocation: </span>{loadError}
+          </div>
+        )}
+        {!resolvedUserId ? (
+          <div className="bg-white rounded-3xl p-10 text-center border border-slate-200 shadow-xs max-w-md mx-auto my-12 space-y-3">
+            <h3 className="text-base font-bold text-slate-900">Allocation Profile Being Configured</h3>
+            <p className="text-xs text-slate-500 leading-relaxed">
+              Your private estate allocation is being provisioned by the farm administrator.
+              Your records will appear here as soon as allocation completes.
+            </p>
+            <button
+              type="button"
+              onClick={() => void loadData()}
+              className="mt-2 inline-flex items-center gap-2 px-5 py-2.5 bg-slate-950 hover:bg-slate-900 text-white font-bold text-xs rounded-xl transition cursor-pointer"
+            >
+              Refresh Status
+            </button>
+          </div>
+        ) : (
+          <CustomerPortal
+            currentUserId={resolvedUserId}
+            customers={customers}
+            onRefreshAll={() => void loadData()}
+            initialTab={initialTab}
+          />
+        )}
       </main>
     </div>
   );

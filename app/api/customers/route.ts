@@ -129,6 +129,16 @@ export async function GET(req: NextRequest) {
     await syncDbCustomersIntoStore();
     const store = getStore();
     const session = await getSessionUser(req);
+    // Standardized auth: customer roster is authenticated-only outside
+    // isolated unit tests (consistent with /api/products which 401s
+    // without a session). Prevents unauthenticated enumeration of the
+    // client list while keeping vitest suites green via isTestMode().
+    if (!session && !isTestMode()) {
+      return NextResponse.json(
+        { success: false, error: 'Unauthorized: Authentication required' },
+        { status: 401 }
+      );
+    }
     const { searchParams } = new URL(req.url);
     const customerId = searchParams.get('id');
 

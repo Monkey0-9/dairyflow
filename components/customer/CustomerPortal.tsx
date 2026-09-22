@@ -16,6 +16,7 @@ import { MemberConcierge } from './MemberConcierge';
 import { ClientUpiPayment } from './ClientUpiPayment';
 import { MemberProfile } from './MemberProfile';
 import { MemberCalendar } from './MemberCalendar';
+import { MemberQR } from './MemberQR';
 import InvoiceModal from '../common/InvoiceModal';
 import ReceiptModal from '../common/ReceiptModal';
 import PhonePeUpiModal from './PhonePeUpiModal';
@@ -42,10 +43,13 @@ export default function CustomerPortal({
   const [milkRequests, setMilkRequests] = useState<ExtraMilkRequest[]>([]);
   const [todayRecord, setTodayRecord] = useState<DeliveryRecord | null>(null);
   const [activeTab, setActiveTab] = useState<'HOME' | 'STATEMENTS' | 'CALENDAR' | 'CONCIERGE' | 'PAYMENT' | 'QR' | 'PROFILE'>(
-    (initialTab === 'QR' ? 'PAYMENT' : initialTab) as 'HOME' | 'STATEMENTS' | 'CALENDAR' | 'CONCIERGE' | 'PAYMENT' | 'QR' | 'PROFILE'
+    initialTab
   );
   const [conciergeInitialSheet, setConciergeInitialSheet] = useState<'pause' | 'extra' | 'qty' | null>(null);
   const [loading, setLoading] = useState(true);
+  // User-facing fetch failure (previously console-only). Rendered as a
+  // retryable banner so clients know when allocation data is stale.
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   // Modals
   const [showInvoiceModal, setShowInvoiceModal] = useState<Invoice | null>(null);
@@ -63,7 +67,11 @@ export default function CustomerPortal({
       return;
     }
     try {
+      setFetchError(null);
       const res = await fetch(`/api/customer/dashboard?customerId=${currentCustomer.id}`);
+      if (!res.ok) {
+        throw new Error(`Server responded with ${res.status}`);
+      }
       const raw = await res.json();
       if (raw.success) {
         const payload = raw.data || raw;
@@ -71,9 +79,12 @@ export default function CustomerPortal({
         setPauseRequests(payload.pauseRequests || raw.pauseRequests || []);
         setMilkRequests(payload.extraMilkRequests || raw.extraMilkRequests || []);
         setTodayRecord(payload.todayRecord || raw.todayRecord || null);
+      } else {
+        throw new Error(raw.error || 'Failed to load allocation details.');
       }
     } catch (err) {
       console.error('Failed to fetch client details', err);
+      setFetchError(err instanceof Error ? err.message : 'Failed to load allocation details.');
     } finally {
       setLoading(false);
     }
@@ -159,6 +170,24 @@ export default function CustomerPortal({
 
   return (
     <div className="space-y-6">
+      {fetchError && (
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 dark:bg-rose-950/30 dark:border-rose-900 px-4 py-3 text-xs text-rose-800 dark:text-rose-200 flex items-start justify-between gap-3" role="alert">
+          <div>
+            <span className="font-bold">Couldn&apos;t refresh your allocation: </span>
+            <span>{fetchError}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setLoading(true);
+              void fetchCustomerDetails();
+            }}
+            className="shrink-0 rounded-lg px-2.5 py-1 font-bold bg-rose-100 dark:bg-rose-900 hover:bg-rose-200 dark:hover:bg-rose-800 transition cursor-pointer"
+          >
+            Retry
+          </button>
+        </div>
+      )}
       {/* Secondary Client Nav Pills */}
       <div className="flex items-center justify-between border-b border-slate-200/80 dark:border-slate-800 pb-3">
         <div className="flex items-center gap-1 sm:gap-2">
@@ -221,13 +250,26 @@ export default function CustomerPortal({
             type="button"
             onClick={() => setActiveTab('PAYMENT')}
             className={`px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
-              activeTab === 'PAYMENT' || activeTab === 'QR'
-                ? 'bg-slate-900 text-white shadow-xs'
-                : 'text-slate-600 hover:bg-slate-100'
+              activeTab === 'PAYMENT'
+                ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-950 shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-900'
             }`}
           >
             <QrCode className="w-3.5 h-3.5 text-emerald-600" />
-            <span>Pay via UPI / QR</span>
+            <span>Pay via UPI</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('QR')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+              activeTab === 'QR'
+                ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-950 shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-900'
+            }`}
+          >
+            <ShieldCheck className="w-3.5 h-3.5 text-amber-500" />
+            <span>QR Token</span>
           </button>
 
           <button
@@ -235,8 +277,8 @@ export default function CustomerPortal({
             onClick={() => setActiveTab('PROFILE')}
             className={`px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
               activeTab === 'PROFILE'
-                ? 'bg-slate-900 text-white shadow-xs'
-                : 'text-slate-600 hover:bg-slate-100'
+                ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-950 shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-900'
             }`}
           >
             <User className="w-3.5 h-3.5" />
@@ -258,7 +300,7 @@ export default function CustomerPortal({
             setConciergeInitialSheet(type);
             setActiveTab('CONCIERGE');
           }}
-          onOpenQR={() => setActiveTab('PAYMENT')}
+          onOpenQR={() => setActiveTab('QR')}
         />
       )}
 
@@ -288,7 +330,7 @@ export default function CustomerPortal({
         />
       )}
 
-      {(activeTab === 'PAYMENT' || activeTab === 'QR') && (
+      {activeTab === 'PAYMENT' && (
         <ClientUpiPayment
           customer={currentCustomer}
           invoices={customerData?.invoices || []}
@@ -297,6 +339,14 @@ export default function CustomerPortal({
             fetchCustomerDetails();
             onRefreshAll();
           }}
+        />
+      )}
+
+      {activeTab === 'QR' && currentCustomer && (
+        <MemberQR
+          customerId={currentCustomer.id}
+          customerCode={currentCustomer.customerCode}
+          customerName={currentCustomer.name}
         />
       )}
 

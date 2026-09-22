@@ -14,6 +14,15 @@ export function resetTestStore(): MilkFlowStore {
 // Full live-DB run: LIVE_DB_TESTS=true TEST_DATABASE_URL=<test-db> npm run test
 export const LIVE_DB_TESTS_ENABLED = process.env.LIVE_DB_TESTS === 'true';
 
+// Webhook HMAC suites sign payloads with this isolated test-only key
+// (mirrors the fallback in webhook specs). Set here so signature
+// verification stays active during unit runs — forged signatures must
+// 401 instead of being skipped. Never used outside tests: production
+// requires RAZORPAY_WEBHOOK_SECRET from the environment (fail-closed).
+if (!process.env.RAZORPAY_WEBHOOK_SECRET) {
+  process.env.RAZORPAY_WEBHOOK_SECRET = 'whsec_milkflow_prod_demo_key_9812';
+}
+
 beforeEach(() => {
   // Guarantee clean isolated state for every test
   resetTestStore();

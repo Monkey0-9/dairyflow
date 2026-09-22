@@ -101,6 +101,14 @@ export async function PATCH(req: NextRequest) {
   try {
     const token = req.cookies.get(SESSION_COOKIE_NAME)?.value;
     const session = decodeSession(token);
+    // Production guard: reviews are authenticated farmer/admin actions.
+    // Never attribute to a hardcoded fallback identity.
+    if (!session && !isUnitTest()) {
+      return NextResponse.json(
+        { success: false, error: 'Unauthorized: Authentication required' },
+        { status: 401 }
+      );
+    }
     const body = await req.json();
 
     const { requestId, type, action, note, rejectionReason, reviewedBy } = body;

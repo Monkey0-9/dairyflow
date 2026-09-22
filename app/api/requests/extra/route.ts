@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getStore } from '@/lib/store';
 import { createExtraMilkRequest, getUnifiedRequests, handleRequestAction } from '@/lib/services/request.service';
 import { isTestMode } from '@/lib/db-scope';
+import { getSessionUser } from '@/lib/auth';
 
 // GET: List extra milk requests
 export async function GET(req: NextRequest) {
@@ -118,11 +119,20 @@ export async function PATCH(req: NextRequest) {
     }
 
     // Production: durable review via transactional service; loud on failure.
+    // Actor identity comes from the authenticated session — never a
+    // hardcoded fallback id.
     if (!isTestMode()) {
+      const session = await getSessionUser(req);
+      if (!session) {
+        return NextResponse.json(
+          { success: false, error: 'Unauthorized: Authentication required' },
+          { status: 401 }
+        );
+      }
       const result = await handleRequestAction(
         requestId,
         action === 'APPROVED' ? 'APPROVE' : 'REJECT',
-        { actorId: 'user_farmer', actorRole: 'FARMER', tenantId: '', notes: note }
+        { actorId: session.userId, actorRole: session.role, tenantId: session.tenantId, notes: note }
       );
       if (!result.success) {
         const notFound = result.error?.startsWith('Request not found');

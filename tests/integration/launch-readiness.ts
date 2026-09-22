@@ -191,9 +191,19 @@ describe('Production Launch Readiness — Vercel, Live Payments, Crons & Securit
   });
 
   describe('7. Vercel Serverless Cron Jobs', () => {
+    // Cron routes are fail-closed: when CRON_SECRET is configured the
+    // Bearer token must accompany the request (user-agent alone never
+    // authorizes). Attach it here so the suite exercises the telemetry
+    // path rather than the 401 guard.
+    const cronAuthHeaders = (): Record<string, string> => {
+      const headers: Record<string, string> = { 'user-agent': 'vercel-cron/1.0' };
+      if (process.env.CRON_SECRET) headers.authorization = `Bearer ${process.env.CRON_SECRET}`;
+      return headers;
+    };
+
     it('GET /api/cron/daily-check returns daily inspection telemetry', async () => {
       const req = new NextRequest('http://localhost:3000/api/cron/daily-check', {
-        headers: { 'user-agent': 'vercel-cron/1.0' },
+        headers: cronAuthHeaders(),
       });
 
       const res = await dailyCheckHandler(req);
@@ -206,7 +216,7 @@ describe('Production Launch Readiness — Vercel, Live Payments, Crons & Securit
 
     it('GET /api/cron/monthly-billing returns monthly billing period results', async () => {
       const req = new NextRequest('http://localhost:3000/api/cron/monthly-billing?month=9&year=2026', {
-        headers: { 'user-agent': 'vercel-cron/1.0' },
+        headers: cronAuthHeaders(),
       });
 
       const res = await monthlyBillingHandler(req);

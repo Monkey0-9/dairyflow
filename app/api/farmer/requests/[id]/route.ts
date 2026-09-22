@@ -21,6 +21,13 @@ export async function PATCH(
   try {
     const token = req.cookies.get(SESSION_COOKIE_NAME)?.value;
     const session = decodeSession(token);
+    // Production guard: reviews are authenticated farmer/admin actions.
+    if (!session && !isUnitTest()) {
+      return NextResponse.json(
+        { success: false, error: 'Unauthorized: Authentication required' },
+        { status: 401 }
+      );
+    }
     const body = await req.json();
 
     const resolvedParams = await Promise.resolve(context.params);

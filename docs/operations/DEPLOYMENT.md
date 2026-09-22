@@ -46,7 +46,8 @@ This is a simple dairy management system that helps you:
    ```
    DATABASE_URL = (paste your Neon connection string)
    SESSION_SECRET = (any random password you like)
-   DEMO_LOGIN_ENABLED = true
+   DEMO_LOGIN_ENABLED = false
+   NEXT_PUBLIC_DEMO_MODE = false
    NODE_ENV = production
    ```
 7. Click "Deploy" - wait 2-3 minutes
@@ -76,7 +77,7 @@ After deployment, you need to create the database tables:
 ## 5. Start Using Your App
 
 1. Open your Vercel URL in browser
-2. Login with demo mode (enabled by default)
+2. Sign in with your real farmer credentials (demo mode stays disabled in production)
 3. Add your first customer
 4. Start recording deliveries
 5. Generate bills at month end
